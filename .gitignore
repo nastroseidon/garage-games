@@ -1,0 +1,5 @@
+# Shot logs written while playing
+logs/
+# Python
+__pycache__/
+*.pyc
