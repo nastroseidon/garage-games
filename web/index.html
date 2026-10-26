@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garage Games</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⛳ GARAGE GAMES</div>
+    <div class="status" id="lm-status"><span class="dot"></span><span class="label">Launch monitor: waiting…</span></div>
+    <div class="actions">
+      <button id="btn-test" title="Fake a shot (T)">🎯 Test shot</button>
+      <button id="btn-undo" title="Undo last shot (U)" class="in-game">↩ Undo</button>
+      <button id="btn-skip" title="Skip this turn (S)" class="in-game">⏭ Skip</button>
+      <button id="btn-sound" title="Sound on/off">🔊</button>
+      <button id="btn-menu" class="in-game" title="Back to menu (Esc)">☰ Menu</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Setup screen -->
+    <section id="setup" class="screen active">
+      <div class="setup-grid">
+        <div class="panel">
+          <h2>Players</h2>
+          <ul id="player-list"></ul>
+          <form id="add-player" autocomplete="off">
+            <input id="new-name" maxlength="16" placeholder="Name">
+            <label class="junior-toggle"><input type="checkbox" id="new-junior"> Junior</label>
+            <button type="submit">Add</button>
+          </form>
+          <p class="hint">Juniors get closer targets and bonus scoring so everyone can compete.</p>
+        </div>
+        <div class="panel">
+          <h2>Pick a game</h2>
+          <div id="game-cards" class="game-cards"></div>
+          <div class="rounds-row">
+            <span>Shots each:</span>
+            <div id="rounds" class="seg"></div>
+          </div>
+          <div class="opt-row">
+            <span>Camera:</span>
+            <div id="opt-camera" class="seg"></div>
+          </div>
+          <div class="opt-row">
+            <span>Graphics:</span>
+            <div id="opt-quality" class="seg"></div>
+          </div>
+          <button id="btn-start" class="big">Start game ▶</button>
+          <p id="setup-error" class="error"></p>
+        </div>
+      </div>
+      <div id="free-shot" class="free-shot"></div>
+    </section>
+
+    <!-- Game screen -->
+    <section id="game" class="screen">
+      <div class="stage">
+        <canvas id="field"></canvas>
+        <canvas id="field3d"></canvas>
+        <div id="bc" class="bc">
+          <div class="bc-bar top"></div>
+          <div class="bc-bar bottom"></div>
+          <div class="bc-bug">
+            <div class="bc-bug-head"><span class="bc-live">● LIVE</span><span class="bc-title">GARAGE GAMES</span></div>
+            <ol id="bc-scores"></ol>
+          </div>
+          <div id="bc-lower" class="bc-lower">
+            <div id="bc-tag" class="bc-tag"></div>
+            <div class="bc-main">
+              <div id="bc-name" class="bc-name"></div>
+              <div id="bc-text" class="bc-text"></div>
+            </div>
+          </div>
+          <div id="bc-data" class="bc-data"></div>
+        </div>
+        <div id="result-banner" class="result-banner"></div>
+      </div>
+      <aside class="side">
+        <div class="game-title" id="game-title"></div>
+        <div class="up-next">
+          <div class="small">UP NEXT</div>
+          <div id="up-name" class="up-name"></div>
+          <div id="up-task" class="up-task"></div>
+          <div id="round-info" class="small"></div>
+        </div>
+        <div class="last-shot" id="last-shot"></div>
+        <h3>Scoreboard</h3>
+        <ol id="scoreboard" class="scoreboard"></ol>
+      </aside>
+    </section>
+  </main>
+
+  <!-- Winner overlay -->
+  <div id="winner" class="overlay">
+    <div class="overlay-card">
+      <div class="trophy">🏆</div>
+      <div id="winner-text" class="winner-text"></div>
+      <ol id="final-board" class="scoreboard"></ol>
+      <div class="overlay-actions">
+        <button id="btn-again" class="big">Play again</button>
+        <button id="btn-menu2" class="big secondary">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="games.js"></script>
+  <script src="director.js"></script>
+  <script src="range3d.js"></script>
+  <script src="app.js"></script>
+  <script type="module" src="range-gl.js"></script>
+</body>
+</html>
