@@ -118,6 +118,12 @@ standing on the range.
   `HITTER_FT`) if your screen differs. The camera looks down at the board at
   the same angle a 6 ft thrower at the foul line would (about 10 degrees), so
   you see the top of the board before each throw (`THROWER_EYE`).
+- **Scores.** The game score, side against side, sits at the top of the
+  sidebar in each side's color. Each player's row shows what they have on the
+  board this inning.
+- **The set.** Just the board and grass: the range's nets, poles, light
+  towers and yardage markers are hidden for this game. A crooked, hand-painted
+  sign by the board's front-left corner shows the hole distance.
 - **Skip** counts as a thrown bag that scored nothing. **Undo** puts the board
   back exactly as it was.
 

@@ -271,6 +271,7 @@ class GameSession:
             "boards": self.boards,
             "options": self.options,
             "extra": g.extra(self),
+            "headline": g.headline(self),
             "over": over,
             "winner": self.winner() if over else None,
         }

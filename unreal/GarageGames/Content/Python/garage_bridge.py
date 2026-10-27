@@ -61,6 +61,14 @@ def _hide(actor, hidden):
     actor.set_is_temporarily_hidden_in_editor(hidden)
 
 
+def _range_dressing(label):
+    """Targets, yardage markers and the light towers' poles and lamps: hidden for Golf Cornhole.
+    The towers' spot lights stay on so the field stays lit."""
+    if label.startswith(("GG_Target_", "GG_Marker_")):
+        return True
+    return label.startswith("GG_Tower_") and label.endswith(("_Pole", "_Lamp"))
+
+
 class CornholeSet:
     """The cornhole board and bags in the open level (sizes and positions come from the server, in yards)."""
 
@@ -84,6 +92,40 @@ class CornholeSet:
         actor.set_actor_rotation(unreal.MathLibrary.compose_rotators(unreal.Rotator(yaw=yaw),
                                                                      unreal.Rotator(pitch=pitch)), False)
         actor.set_actor_scale3d(unreal.Vector(*[max(v, 1e-4) * gs.YARD_CM / 100.0 for v in size_yd]))
+
+    def _place_axes(self, actor, center_yd, size_yd, x_axis, z_axis):
+        """Place a basic shape with its X and Z axes along the given directions (yards)."""
+        actor.set_actor_location(vec(gs.to_unreal(center_yd)), False, False)
+        actor.set_actor_rotation(unreal.MathLibrary.make_rot_from_xz(vec(x_axis), vec(z_axis)), False)
+        actor.set_actor_scale3d(unreal.Vector(*[max(v, 1e-4) * gs.YARD_CM / 100.0 for v in size_yd]))
+
+    def _sign(self, sg):
+        """The crooked yardage sign: a plank on a post, the number painted on in black strokes."""
+        u, v, n, base = sg["u"], sg["v"], sg["n"], sg["base"]
+
+        def at(a, b, c):
+            return [base[i] + a * u[i] + b * v[i] + c * n[i] for i in range(3)]
+        mid = sg["post_h"] + sg["h"] / 2
+        plank, _ = self._spawn(CH + "Sign_Plank", "Cube", "#a8773f")
+        self._place_axes(plank, at(0, mid, 0), [sg["w"], sg["t"], sg["h"]], u, v)
+        post_len = sg["post_h"] + sg["h"] * 0.85
+        post, _ = self._spawn(CH + "Sign_Post", "Cube", "#7a5530")
+        self._place_axes(post, at(0, post_len / 2, -sg["t"] / 2 - sg["post_w"] * 0.4),
+                         [sg["post_w"], sg["post_w"] * 0.8, post_len], u, v)
+        face = sg["t"] / 2 + sg["t"] * 0.05
+        k = 0
+        for stroke in sg["strokes"]:
+            pts, w = stroke["pts"], stroke["w"]
+            for (a0, b0), (a1, b1) in zip(pts, pts[1:]):
+                da, db = a1 - a0, b1 - b0
+                ln = math.hypot(da, db)
+                if ln < 1e-6:
+                    continue
+                d = [(da * u[i] + db * v[i]) / ln for i in range(3)]
+                seg, _ = self._spawn(CH + "Sign_Paint_%02d" % k, "Cube", "#1a120a")
+                self._place_axes(seg, at((a0 + a1) / 2, mid + (b0 + b1) / 2, face), [ln + w * 0.9, w, sg["t"] * 0.08],
+                                 d, n)
+                k += 1
 
     def show(self, board):
         key = json.dumps(board, sort_keys=True)
@@ -109,6 +151,8 @@ class CornholeSet:
             leg, _ = self._spawn(CH + "Leg_%d" % side, "Cube", "#8a5a2b")
             h = board["back"][2] - 1.5 * fr   # up to the underside of the frame
             self._place(leg, [board["back"][0] - 1.5 * fr, side * W * 0.42, h / 2], [fr * 0.8, fr * 0.8, h])
+        if board.get("sign"):
+            self._sign(board["sign"])
         self.bag_size = (board["bag"], board["bag_t"])
         # all 8 bags up front: spawning them mid-throw stalls a frame
         while len(self.bags) < 8:
@@ -116,7 +160,7 @@ class CornholeSet:
             _hide(actor, True)
             self.bags.append((actor, mid))
         for a in _actors().get_all_level_actors():
-            if a.get_actor_label().startswith("GG_Target_"):
+            if _range_dressing(a.get_actor_label()):
                 _hide(a, True)
 
     def place_bags(self, bags):
@@ -141,7 +185,7 @@ class CornholeSet:
             label = a.get_actor_label()
             if label.startswith(CH):
                 _actors().destroy_actor(a)
-            elif label.startswith("GG_Target_"):
+            elif _range_dressing(label):
                 _hide(a, False)
         self.key, self.bags = None, []
 
