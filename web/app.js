@@ -22,6 +22,7 @@
   var players = loadPlayers();
   var selectedGame = null;
   var rounds = 5;
+  var gameOpts = {};     // game id -> {option key: value} (Golf Cornhole's hole distance)
   var ctx = null;        // the running game: {info, game (drawing helpers), state (from the server), players, history, board}
   var replay = null;     // {rec, start, until} - the shot currently being shown
   var soundOn = true;
@@ -95,7 +96,7 @@
       b.appendChild(el("div", "emoji", game.emoji));
       b.appendChild(el("div", "gname", game.name));
       b.appendChild(el("div", "blurb", game.blurb));
-      b.onclick = function () { selectedGame = game; renderGameCards(); renderRounds(); };
+      b.onclick = function () { selectedGame = game; renderGameCards(); renderRounds(); renderGameOptions(); };
       box.appendChild(b);
     });
   }
@@ -111,6 +112,27 @@
       var b = el("button", n === rounds ? "selected" : "", String(n));
       b.onclick = function () { rounds = n; renderRounds(); };
       box.appendChild(b);
+    });
+  }
+
+  // Extra choices a game asks for (e.g. Golf Cornhole's hole distance), from /api/games.
+  function renderGameOptions() {
+    var box = $("game-options");
+    box.innerHTML = "";
+    if (!selectedGame || !selectedGame.options) return;
+    var chosen = gameOpts[selectedGame.id] = gameOpts[selectedGame.id] || {};
+    selectedGame.options.forEach(function (o) {
+      if (o.choices.indexOf(chosen[o.key]) < 0) chosen[o.key] = o.default;
+      var row = el("div", "opt-row");
+      row.appendChild(el("span", "", o.label + ":"));
+      var seg = el("div", "seg");
+      o.choices.forEach(function (v) {
+        var b = el("button", v === chosen[o.key] ? "selected" : "", v + (o.unit ? " " + o.unit : ""));
+        b.onclick = function () { chosen[o.key] = v; renderGameOptions(); };
+        seg.appendChild(b);
+      });
+      row.appendChild(seg);
+      box.appendChild(row);
     });
   }
 
@@ -170,7 +192,7 @@
     }
     $("setup-error").textContent = "";
     api("/api/game/start", {
-      game: info.id, rounds: rounds, camera: settings.camera,
+      game: info.id, rounds: rounds, camera: settings.camera, options: gameOpts[info.id] || {},
       players: players.map(function (p) { return { name: p.name, junior: !!p.junior, color: p.color }; })
     }).catch(function (e) { $("setup-error").textContent = e.message; });
   }
@@ -218,6 +240,7 @@
   }
 
   function playerCount() { return ctx.players.length; }
+  function isCornhole() { return !!ctx && ctx.info.view === "cornhole"; }
   function isOver() { return ctx.state.over; }
 
   function skipTurn() { if (ctx && !isOver()) api("/api/game/skip"); }
@@ -258,7 +281,7 @@
       ["Carry", f.carry_yd.toFixed(1) + " yds"],
       ["Offline", Math.abs(f.offline_yd).toFixed(1) + " " + (f.offline_yd >= 0 ? "R" : "L")]
     ];
-    if (ctx && ctx.info.view === "range3d" && f.total_yd) items.push(["Total (with roll)", f.total_yd.toFixed(1) + " yds"]);
+    if (ctx && ctx.info.view !== "speed" && f.total_yd) items.push(["Total (with roll)", f.total_yd.toFixed(1) + " yds"]);
     if (shot.club_speed_mph) {
       items.push(["Club speed", shot.club_speed_mph.toFixed(1) + " mph"]);
       items.push(["Smash", (shot.speed_mph / shot.club_speed_mph).toFixed(2)]);
@@ -292,7 +315,7 @@
       highlight: ev.highlight, scores: ev.scores };
     var now = performance.now();
     clearBroadcast();
-    if (ev.plan && glRenderer()) {
+    if (ev.plan && (glRenderer() || isCornhole())) {
       var plan = window.GarageShotPlan.player(ev.plan);
       replay = { rec: rec, start: now, dur: plan.totalMs, until: now + plan.totalMs, plan: plan };
       if (plan.mode === "broadcast") runBroadcast(rec, plan);
@@ -304,7 +327,7 @@
       return;
     }
     renderLastShot(shot);
-    var dur = ctx.game.animMs ? ctx.game.animMs(shot, rec.result) : ev.anim_ms;
+    var dur = ctx.game && ctx.game.animMs ? ctx.game.animMs(shot, rec.result) : ev.anim_ms;
     replay = { rec: rec, start: now, dur: dur, until: now + dur + BANNER_MS };
     setTimeout(function () { showBanner(rec); }, ctx.info.view === "speed" ? 900 : dur);
     afterTurn();
@@ -334,7 +357,7 @@
         var dot = el("span", "dot"); dot.style.background = row.p.color;
         li.appendChild(dot);
         li.appendChild(el("span", "n", row.p.name));
-        li.appendChild(el("span", "", ctx.game.formatScore(row.v)));
+        li.appendChild(el("span", "", ctx.game ? ctx.game.formatScore(row.v) : String(row.v)));
         list.appendChild(li);
       });
   }
@@ -461,10 +484,13 @@
   function drawRangeGL(r, highlight, showing, now) {
     var stage = $("field3d").parentElement;
     r.resize(stage.clientWidth, stage.clientHeight);
-    var recent = recentShots(showing);
+    var recent = isCornhole() ? [] : recentShots(showing);
     var plan = showing && showing.plan;
     if (plan && debugWall !== null) showing.start = now - debugWall * 1000;
+    var extra = ctx.state.extra;
     r.render({
+      cornhole: isCornhole() ? { board: extra.board, bags: cornholeBags(showing, now),
+        idleCamera: extra.idle_camera } : null,
       now: now,
       plan: plan || null,
       wall: plan ? (now - showing.start) / 1000 : 0,
@@ -484,14 +510,49 @@
     var showing = replay && now < replay.until ? replay : null;
     var target = showing ? showing.rec.target : ctx.state.current.target;
     var highlight = showing ? showing.rec.highlight : ctx.state.current.highlight;
-    var r = ctx.info.view === "range3d" ? glRenderer() : null;
+    var r = ctx.info.view === "range3d" || isCornhole() ? glRenderer() : null;
     canvas.style.display = r ? "none" : "block";
     $("field3d").style.display = r ? "block" : "none";
     if (r && (!showing || showing.plan)) return drawRangeGL(r, highlight, showing, now);
     var size = fit();
-    if (ctx.info.view === "speed") drawSpeed(size, target, showing, now);
+    if (isCornhole()) drawCornhole2D(size, showing, now);
+    else if (ctx.info.view === "speed") drawSpeed(size, target, showing, now);
     else if (ctx.info.view === "range3d") drawRange3D(size, highlight, showing, now);
     else drawRange(size, target, showing, now);
+  }
+
+  /* Golf Cornhole: every bag's [x, y, z, yaw, pitch, visible] and colour, from the shot
+   * plan while a throw plays, otherwise from the state the server sent. */
+  function cornholeBags(showing, now) {
+    if (showing && showing.plan && showing.plan.cornhole) {
+      return showing.plan.bags((now - showing.start) / 1000);
+    }
+    return ctx.state.extra.bags.map(function (b) { return { pose: b.pose, color: b.color }; });
+  }
+
+  // Classic 2D: the board from above.
+  function drawCornhole2D(size, showing, now) {
+    var W = size.w, H = size.h, g = g2, B = ctx.state.extra.board;
+    g.fillStyle = "#1f5f34"; g.fillRect(0, 0, W, H);
+    var span = B.length * 1.9, scale = Math.min(H / span, W / (B.width * 2.4));
+    var mid = (B.front[0] + B.back[0]) / 2;
+    var px = function (d, l) { return [W / 2 + l * scale, H / 2 - (d - mid) * scale]; };
+    var a = px(B.back[0], -B.width / 2), b = px(B.front[0], B.width / 2);
+    g.fillStyle = "#c8a165"; g.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    g.strokeStyle = "#6b4a22"; g.lineWidth = 4; g.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    var h = px(B.hole[0], 0);
+    g.fillStyle = "#111"; g.beginPath(); g.arc(h[0], h[1], B.hole_r * scale, 0, Math.PI * 2); g.fill();
+    cornholeBags(showing, now).forEach(function (bag) {
+      var p = bag.pose;
+      if (!p[5]) return;
+      var c = px(p[0], p[1]), s = B.bag * scale * (p[6] || 1);
+      g.save(); g.translate(c[0], c[1]); g.rotate(p[3] * Math.PI / 180);
+      g.fillStyle = bag.color; g.strokeStyle = "rgba(0,0,0,0.6)"; g.lineWidth = 2;
+      g.fillRect(-s / 2, -s / 2, s, s); g.strokeRect(-s / 2, -s / 2, s, s);
+      g.restore();
+    });
+    g.fillStyle = "rgba(255,255,255,0.7)"; g.font = "bold 16px Segoe UI, sans-serif"; g.textAlign = "left";
+    g.fillText("Hole at " + B.distance + " yds", 12, 24);
   }
 
   function drawRange3D(size, highlight, showing, now) {
@@ -758,6 +819,7 @@
     selectedGame = catalog.games[0];
     renderGameCards();
     renderRounds();
+    renderGameOptions();
     connectEvents();
   }).catch(function () { setStatus(null); });
   // read-only peek for automated tests

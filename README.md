@@ -90,6 +90,35 @@ In the classic games, a player marked **Junior** gets targets at half the
 distance (and half the speed in Hit the Number). In Long Drive their carry
 counts double.
 
+### Golf Cornhole (3D)
+
+Your shot becomes a cornhole bag. It flies your ball's real flight and lands
+where the ball would have landed on a driving range, on a giant cornhole board
+standing on the range.
+
+- **Pick the hole distance** (30 to 250 yds) before the game. The whole set
+  scales with it: the hole's radius is 3% of the distance (3 yds at 100 yds,
+  7.5 yds at 250). The board, bags and slope keep official proportions around
+  it: a 2 × 4 board, 6 in hole 9 in from the back, front 3 in and back 12 in
+  high. At 100 yds the board covers about 61 to 109 yds downrange and 12 yds
+  either side of the line. A 120-yard carry goes over it; a shot 15 yds
+  wide misses.
+- **After landing,** the bag slides as far (in board terms) as the ball would
+  have rolled, up the slope. It can bump other bags, knock them into the hole
+  or off the board, drop in the hole, or slide off an edge. A bag that lands
+  on the grass first scores nothing (a foul bag).
+- **Official (ACL) scoring.** Two sides (1v1, or teams: players 1 & 3 against
+  2 & 4) throw 4 bags each per inning, alternating. In the hole is 3, on the
+  board 1. Only the difference scores (cancellation). The first side to 21 (or
+  11) at the end of an inning wins, and whoever scored last inning throws
+  first. Teammates take turns, one inning each.
+- **Life-size view.** The golfer's camera matches a 12 × 9 ft screen seen from
+  10 ft, so the board looks as big as a real board at the same distance. The
+  numbers are at the top of `cornhole.py` (`SCREEN_W_FT`, `SCREEN_H_FT`,
+  `HITTER_FT`) if your screen differs.
+- **Skip** counts as a thrown bag that scored nothing. **Undo** puts the board
+  back exactly as it was.
+
 ## What you need
 
 - The Windows PC that runs your VTrack software.

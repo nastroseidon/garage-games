@@ -153,6 +153,8 @@ class ShotPlayer:
         self.rest_s = msg["rest_ms"] / 1000.0
         self.in_cup = msg["in_cup"]
         self.cuts = msg["cuts"]
+        self.cornhole = msg.get("cornhole")   # Golf Cornhole: the board and every bag
+        self.aspect = (self.cornhole or {}).get("aspect", 16 / 9)
 
     def _at(self, wall):
         f = max(0.0, wall * self.fps)
@@ -177,6 +179,23 @@ class ShotPlayer:
             b = a
         return ([_lerp(a[k], b[k], t) for k in range(3)], [_lerp(a[k], b[k], t) for k in range(3, 6)],
                 _lerp(a[6], b[6], t), int(a[7]))
+
+    def bags(self, wall):
+        """Golf Cornhole: [(pose, colour)] for every bag. pose = [x, y, z, yaw, pitch, visible, size]."""
+        if not self.cornhole:
+            return []
+        i, j, t = self._at(wall)
+        out = []
+        for b in self.cornhole["bags"]:
+            if "frames" not in b:
+                out.append((b["pose"], b["color"]))
+                continue
+            p, q = b["frames"][i], b["frames"][j]
+            dy = ((q[3] - p[3] + 540) % 360) - 180   # the short way round
+            vis = 1 if p[5] and q[5] else (p[5] if t < 0.5 else q[5])
+            out.append(([_lerp(p[0], q[0], t), _lerp(p[1], q[1], t), _lerp(p[2], q[2], t), p[3] + dy * t,
+                         _lerp(p[4], q[4], t), vis, _lerp(p[6], q[6], t)], b["color"]))
+        return out
 
 
 # ---------------- Unreal coordinates ----------------

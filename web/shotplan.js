@@ -27,6 +27,19 @@
       landMs: msg.land_ms,
       inCup: msg.in_cup,
       captions: msg.captions,
+      cornhole: msg.cornhole || null,
+      // Golf Cornhole: [{pose: [x, y, z, yaw, pitch, visible], color}] for every bag
+      bags: function (wall) {
+        var k = at(wall);
+        return (msg.cornhole ? msg.cornhole.bags : []).map(function (b) {
+          if (!b.frames) return { pose: b.pose, color: b.color };
+          var p = b.frames[k.i], q = b.frames[k.j];
+          var dy = ((q[3] - p[3] + 540) % 360) - 180;  // the short way round
+          return { color: b.color, pose: [lerp(p[0], q[0], k.t), lerp(p[1], q[1], k.t), lerp(p[2], q[2], k.t),
+            p[3] + dy * k.t, lerp(p[4], q[4], k.t), p[5] && q[5] ? 1 : k.t < 0.5 ? p[5] : q[5],
+            lerp(p[6], q[6], k.t)] };
+        });
+      },
       ball: function (wall) {
         var k = at(wall), a = ball[k.i], b = ball[k.j];
         var inCup = msg.in_cup && wall >= restS;

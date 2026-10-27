@@ -102,7 +102,7 @@ class ClassicGameTests(unittest.TestCase):
     def test_every_game_has_the_required_pieces(self):
         self.assertEqual([g.id for g in games.GAMES],
                          ["targetrange", "calledshot", "ladder", "closest", "darts", "speed", "longdrive",
-                          "tictactoe"])
+                          "tictactoe", "cornhole"])
         for g in games.GAMES:
             for k in ("id", "name", "emoji", "blurb", "view"):
                 self.assertTrue(getattr(g, k), "%s missing %s" % (g.id, k))

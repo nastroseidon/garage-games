@@ -25,10 +25,12 @@ class GameSession:
         self.board = None
         self.ttt_winner = None
         self.boards = 1
+        self.options = {}         # game options (Golf Cornhole's hole distance)
+        self.replaying = False    # True while undo replays the shots
 
     # ---------------- setup ----------------
 
-    def start(self, game_id, players, rounds=None, camera=None):
+    def start(self, game_id, players, rounds=None, camera=None, options=None):
         game = games.game_by_id(game_id, self.games)
         if game is None:
             raise ValueError("unknown game: %s" % game_id)
@@ -40,9 +42,11 @@ class GameSession:
         if len(clean) < game.min_players:
             raise ValueError("%s needs at least %d player%s." % (
                 game.name, game.min_players, "s" if game.min_players > 1 else ""))
+        options = game.check_options(options)
         if camera:
             self.set_camera(camera)
         self.game = game
+        self.options = options
         self.players = clean
         self.rounds = int(rounds or game.default_rounds or 5)
         if self.rounds < 1:
@@ -94,9 +98,20 @@ class GameSession:
         idx, t = self.current()
         return self.game.test_kind(t, self, idx)
 
+    def test_shot(self):
+        """Launch numbers the game wants for a test shot ({}: the server picks)."""
+        if not self.active or self.is_over():
+            return {}
+        idx, t = self.current()
+        return self.game.test_shot(t, self, idx)
+
     # ---------------- shots ----------------
 
     def totals(self, history=None):
+        if history is None:
+            given = self.game.player_totals(self)
+            if given is not None:
+                return given
         t = [0] * len(self.players)
         for r in self.history if history is None else history:
             t[r["idx"]] += r["result"]["points"]
@@ -125,6 +140,8 @@ class GameSession:
             p = director.plan(shot, result, {"style": self.camera, "drama": drama, "hit": hit,
                                              "targets": games.TARGETS})
             event["plan"] = director.to_message(p, shot, result, player)
+        elif self.game.view == "cornhole":
+            event["plan"] = self.game.plan(self, shot, result, player, self.camera)
         else:
             event["anim_ms"] = self._anim_ms(shot, result)
         event["state"] = self.snapshot()
@@ -158,6 +175,7 @@ class GameSession:
         self.history.append({"turn": self.turn, "idx": idx, "shot": None, "target": self.target_for(idx, self.turn),
                              "result": {"points": self.game.miss_points, "what": "Skipped", "detail": "",
                                         "great": False}})
+        self.game.on_skip(self)
         self.turn += 1
         return True
 
@@ -168,9 +186,15 @@ class GameSession:
         # Rebuild any game state (e.g. the tic-tac-toe board) by replaying shots.
         if self.game.stateful:
             self.game.reset(self)
-            for rec in self.history:
-                if rec["shot"]:
-                    self.game.score(rec["shot"], rec["target"], self.players[rec["idx"]], self, rec["idx"])
+            self.replaying = True
+            try:
+                for rec in self.history:
+                    if rec["shot"]:
+                        self.game.score(rec["shot"], rec["target"], self.players[rec["idx"]], self, rec["idx"])
+                    else:
+                        self.game.on_skip(self)
+            finally:
+                self.replaying = False
         self.turn = len(self.history)
         return True
 
@@ -214,7 +238,9 @@ class GameSession:
         idx, t = self.current()
         p = self.players[idx]
         over = self.is_over()
-        if not g.uses_rounds:
+        if g.round_info(self):
+            round_info = g.round_info(self)
+        elif not g.uses_rounds:
             round_info = "BOARD %d" % (self.boards or 1)
         else:
             round_info = "ROUND %d OF %d" % (min(self.rounds, self.round_of(self.turn) + 1), self.rounds)
@@ -243,6 +269,8 @@ class GameSession:
             "history": history,
             "board": self.board,
             "boards": self.boards,
+            "options": self.options,
+            "extra": g.extra(self),
             "over": over,
             "winner": self.winner() if over else None,
         }
