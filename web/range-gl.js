@@ -10,6 +10,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { buildCamp } from "./camp-gl.js";
 
 const toV = (p, out) => (out || new THREE.Vector3()).set(p[1], p[2] || 0, -p[0]);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -105,7 +106,9 @@ class RangeGL {
       })
     );
     sky.renderOrder = -2;
-    this.scene.add(sky);
+    this.skyGroup = new THREE.Group();   // the sky and stars: pushed out past the woods for Golf Cornhole
+    this.skyGroup.add(sky);
+    this.scene.add(this.skyGroup);
 
     const starPos = [];
     for (let i = 0; i < 900; i++) {
@@ -114,7 +117,7 @@ class RangeGL {
     }
     const sg = new THREE.BufferGeometry();
     sg.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
-    this.scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
+    this.skyGroup.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
 
     // tree line silhouette all around the horizon
     const trees = canvasTexture(1024, 128, (g, w, h) => {
@@ -137,6 +140,7 @@ class RangeGL {
     treeRing.position.y = 30;
     treeRing.renderOrder = -1;
     this.scene.add(treeRing);
+    this.dressing.push(treeRing);
   }
 
   buildGround() {
@@ -159,6 +163,7 @@ class RangeGL {
     ground.position.z = -300;
     ground.receiveShadow = true;
     this.scene.add(ground);
+    this.dressing.push(ground);   // Golf Cornhole has its own ground, at the board's scale
 
     // faint yardage lines
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, depthWrite: false });
@@ -207,8 +212,10 @@ class RangeGL {
   }
 
   buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0x7d8cff, 0x1b3a25, 0.65));
+    this.hemi = new THREE.HemisphereLight(0x7d8cff, 0x1b3a25, 0.65);
+    this.scene.add(this.hemi);
     const key = new THREE.DirectionalLight(0xfff1dc, 1.7);
+    this.key = key;
     key.position.set(40, 140, 60);
     key.target.position.set(0, 0, -130);
     key.castShadow = this.high;
@@ -404,9 +411,16 @@ class RangeGL {
 
   /* Golf Cornhole: the board (positions from the server, in yards) and a pool of bags. */
   setCornhole(info) {
+    if (this.cornhole && this.cornhole.info === info) return;
     const key = JSON.stringify(info);
-    if (this.cornhole && this.cornhole.key === key) return;
-    if (this.cornhole) this.scene.remove(this.cornhole.group);
+    if (this.cornhole && this.cornhole.key === key) { this.cornhole.info = info; return; }
+    if (this.cornhole) {
+      this.scene.remove(this.cornhole.group);
+      this.cornhole.group.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        [].concat(o.material || []).forEach((m) => { if (m.map) m.map.dispose(); if (m.alphaMap) m.alphaMap.dispose(); m.dispose(); });
+      });
+    }
     const group = new THREE.Group();
     const slope = info.slope_deg * Math.PI / 180;
     const n = new THREE.Vector3(0, Math.cos(slope), Math.sin(slope));  // the top's normal
@@ -452,8 +466,41 @@ class RangeGL {
       bags.push(m);
     }
     if (info.sign) group.add(this.buildYardageSign(info.sign));
+    const camp = info.camp ? buildCamp(info.camp, { high: this.high, anisotropy: this.renderer.capabilities.getMaxAnisotropy() }) : null;
+    if (camp) group.add(camp.group);
     this.scene.add(group);
-    this.cornhole = { key, group, bags };
+    this.cornhole = { key, info, group, bags, camp };
+  }
+
+  /* The campsite's night: fog, sky, moonlight and the camera's range, all at the board's scale
+     (k yards per real metre); null puts the driving range back. */
+  campMode(k) {
+    if (this.campK === k) return;
+    if (!this.rangeLook) {
+      this.rangeLook = { fog: this.scene.fog.color.getHex(), density: this.scene.fog.density, near: this.camera.near, far: this.camera.far,
+        hemi: [this.hemi.color.getHex(), this.hemi.groundColor.getHex(), this.hemi.intensity],
+        key: [this.key.color.getHex(), this.key.intensity, this.key.castShadow] };
+    }
+    const r = this.rangeLook;
+    this.campK = k;
+    if (k) {
+      this.scene.fog.color.set(0x070b14);
+      this.scene.fog.density = 0.035 / k;
+      this.camera.near = 0.01 * k;
+      this.camera.far = 220 * k;
+      this.skyGroup.scale.setScalar(Math.max(1, 115 * k / 1800));
+      this.hemi.color.set(0x5466a8); this.hemi.groundColor.set(0x2a1d10); this.hemi.intensity = 0.42;
+      this.key.color.set(0x9fb4ff); this.key.intensity = 0.5; this.key.castShadow = false;
+    } else {
+      this.scene.fog.color.set(r.fog);
+      this.scene.fog.density = r.density;
+      this.camera.near = r.near;
+      this.camera.far = r.far;
+      this.skyGroup.scale.setScalar(1);
+      this.hemi.color.set(r.hemi[0]); this.hemi.groundColor.set(r.hemi[1]); this.hemi.intensity = r.hemi[2];
+      this.key.color.set(r.key[0]); this.key.intensity = r.key[1]; this.key.castShadow = r.key[2];
+    }
+    this.camera.updateProjectionMatrix();
   }
 
   /* A weathered plank on a post with the yardage painted on by hand (layout from the server, in yards). */
@@ -527,6 +574,7 @@ class RangeGL {
     if (this.cornhole) this.cornhole.group.visible = on;
     this.dressing.forEach((o) => { o.visible = !on; });
     this.targetObjs.forEach((o) => { o.grp.visible = !on; });
+    this.campMode(on && this.cornhole && this.cornhole.camp ? this.cornhole.camp.k : null);
     if (!on) return;
     this.cornhole.bags.forEach((m, i) => {
       const b = c.bags[i];
@@ -562,6 +610,7 @@ class RangeGL {
     const plan = frame.plan;
     const ch = frame.cornhole;
     this.showCornhole(ch);
+    if (ch && this.cornhole && this.cornhole.camp) this.cornhole.camp.update(now / 1000, dt);
 
     if (frame.shotId !== this.shotId) {
       this.shotId = frame.shotId;
