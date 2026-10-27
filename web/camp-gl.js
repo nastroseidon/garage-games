@@ -481,20 +481,22 @@ export function buildCamp(camp, opts) {
     parent.add(glass, cap, foot);
   };
 
-  // the shepherd's hook just off the left of the starting view: it lights the board
-  const hook = new THREE.Group();
-  hook.position.copy(toV(camp.hook.p));
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012 * k, 0.014 * k, camp.hook.h, 8), metal);
-  pole.position.y = camp.hook.h / 2;
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(camp.hook.arm, 0.015 * k, 0.015 * k), metal);
-  arm.position.set(camp.hook.arm / 2, camp.hook.h, 0);
-  hook.add(pole, arm);
-  lantern(hook, camp.hook.arm, camp.hook.h - 0.16 * k, 0, k);
-  const hookLight = new THREE.PointLight(0xffb46b, 7 * k * k, 0, 2);
-  hookLight.position.set(camp.hook.arm, camp.hook.h - 0.16 * k, 0);
-  hook.add(hookLight);
-  lights.push(hookLight);
-  add(hook);
+  // shepherd's hooks either side of the board, just out of the starting view: they light it
+  camp.hooks.forEach((hk) => {
+    const hook = new THREE.Group(), reach = -hk.side * hk.arm;   // the arm reaches in towards the board
+    hook.position.copy(toV(hk.p));
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012 * k, 0.014 * k, hk.h, 8), metal);
+    pole.position.y = hk.h / 2;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(hk.arm, 0.015 * k, 0.015 * k), metal);
+    arm.position.set(reach / 2, hk.h, 0);
+    hook.add(pole, arm);
+    lantern(hook, reach, hk.h - 0.16 * k, 0, k);
+    const hookLight = new THREE.PointLight(0xffb46b, 7 * k * k, 0, 2);
+    hookLight.position.set(reach, hk.h - 0.16 * k, 0);
+    hook.add(hookLight);
+    lights.push(hookLight);
+    add(hook);
+  });
 
   // ---- string lights between two trees ----
   const pts = camp.lights.map((p) => toV(p));

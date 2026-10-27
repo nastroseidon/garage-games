@@ -109,6 +109,32 @@ What this PC uses (for credit; none of it is in the repo):
 - *025_Grass* by NoblesseOblige-No.1, licensed
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Golf Cornhole's campsite models (optional)
+
+The campsite is built from simple shapes. Where this PC has these models
+(from Fab and elsewhere, imported anywhere under `Content/`; never committed),
+they stand in for the shapes the next time a Golf Cornhole game starts:
+
+| Camp item | Model (asset name) |
+|---|---|
+| Trees (all of them) | `SM_PSG_Abies_lasiocarpa001` to `006` |
+| Rocks | `stone`, `river_rock` |
+| Campfire stone ring | `forest_stones_campfire` |
+| Tents | `camping_tent` |
+| Picnic table | `picnic_table_low_poly` |
+| Cooler | `cooler_box__BLEND_` |
+| Camp chairs | `chair_low_poly` |
+| Log seats | `SM_FirewoodBlackCherryPiece01` |
+| Woodpile | `SM_FirewoodStackBlackCherry02` |
+| One stump, with a lit lantern on it | `woodsman_collection_railroad_lantern` |
+
+`MODELS` in `Content/Python/garage_camp.py` lists them, with how much each
+one is turned (some import upside down) and how big it is. To use another
+model, add its asset name there. Anything missing stays a shape, and the
+bushes, string lights, hooks and flames are always shapes. The firs cast no
+shadows and fade out past 40 real metres, which keeps a shot near 80 fps
+on an RTX 3080 (about 45 fps otherwise).
+
 ## Check it runs smoothly (with the VTrack software running)
 
 After every shot the Output Log prints a line like:
