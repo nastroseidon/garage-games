@@ -276,9 +276,12 @@ def campsite(board):
     stumps = [{"p": at(6.9, 2.9), "r": m(0.24), "h": m(0.4)}, {"p": at(-1.6, 4.6), "r": m(0.2), "h": m(0.3)}]
     for s_ in ((6.9, 2.9), (-1.6, 4.6)):
         claim(s_[0], s_[1], 0.4)
-    # a lantern on a shepherd's hook, just off the left of the starting view: it lights the board
-    hook = {"p": at(-0.4, -1.75), "h": m(1.7), "arm": m(0.3)}
-    claim(-0.4, -1.75, 0.3)
+    # lanterns on shepherd's hooks either side of the board, just out of the starting view: they light it.
+    # side -1 is left of the board, +1 right; the arm reaches in towards the board.
+    hooks = []
+    for side in (-1, 1):
+        hooks.append({"p": at(-0.4, side * 1.75), "h": m(1.7), "arm": m(0.3), "side": side})
+        claim(-0.4, side * 1.75, 0.3)
 
     trees = []
 
@@ -337,7 +340,7 @@ def campsite(board):
 
     return {"k": round(k, 4), "center": at(cx, cy), "clearing_r": m(CAMP_CLEARING_R), "ground_r": m(140),
             "fire": {"p": at(fx, fy), "r": m(0.55)}, "logs": logs, "chairs": chairs, "tents": tents,
-            "table": table, "cooler": cooler, "woodpile": woodpile, "stumps": stumps, "hook": hook,
+            "table": table, "cooler": cooler, "woodpile": woodpile, "stumps": stumps, "hooks": hooks,
             "trees": trees, "lights": lights, "rocks": rocks, "bushes": bushes}
 
 

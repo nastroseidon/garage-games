@@ -81,8 +81,8 @@ class BoardTests(unittest.TestCase):
         b = C.Board(100)
         c = b.info()["camp"]
         x0, x1, half = C.CAMP_LANE
-        things = ([c["fire"], c["table"], c["cooler"], c["woodpile"], c["hook"]] + c["logs"] + c["chairs"] + c["tents"]
-                  + c["stumps"] + c["trees"] + c["rocks"] + c["bushes"])
+        things = ([c["fire"], c["table"], c["cooler"], c["woodpile"]] + c["hooks"] + c["logs"] + c["chairs"]
+                  + c["tents"] + c["stumps"] + c["trees"] + c["rocks"] + c["bushes"])
         for t in things:
             x, y, _ = b.from_range(*t["p"])
             self.assertFalse(x0 < x < x1 and abs(y) < half, t)

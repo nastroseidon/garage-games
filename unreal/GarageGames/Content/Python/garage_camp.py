@@ -7,6 +7,9 @@ the board; camp["k"] is yards per real metre, for the sizes of the small things 
 Everything that stands still is batched by shape and colour into a few instanced-mesh actors;
 the fire's flames, embers and the lights are their own actors so they can flicker. All actors are
 named GG_CH_Camp_... so CornholeSet.clear() removes them with the board.
+
+Where this PC has the models in MODELS (from Fab and elsewhere: never committed, their licences
+don't allow it), they stand in for the shapes; on any other PC the camp is built from shapes.
 """
 
 import math
@@ -25,6 +28,28 @@ BARK = "#6b5040"
 LAMP = "#ffc98a"
 CAMP_EXPOSURE = -0.3    # exposure compensation (EV) while the camp is up
 FIRE_CD = 20.0    # the campfire's light, in real candelas (it flickers around this)
+GRASS_TILE_M = 1.2    # one repeat of the grass texture, in real metres
+
+# Models that stand in for the camp's shapes, found by asset name anywhere under Content/.
+# m: real metres per model unit (None: fitted to the server's size). yaw, roll: degrees that turn the
+# model so it stands upright with its front along +X (the camp's forward). floor: the model's z (in
+# its own units, before turning) that stands on the ground; the bottom of its bounds if not given.
+# The firs cast no shadows and fade out past 40 real metres (where the night is dark anyway): at the
+# camp's scale their leaves cover the screen many times over, and the fire's shadows draw them six times.
+MODELS = {
+    "tree": [{"mesh": "SM_PSG_Abies_lasiocarpa%03d" % i, "shadow": False, "cull_m": 40.0} for i in range(1, 7)],
+    "rock": [{"mesh": "stone"}, {"mesh": "river_rock"}],
+    "campfire": [{"mesh": "forest_stones_campfire", "m": 1.35 / 845}],
+    "tent": [{"mesh": "camping_tent", "m": 0.01, "yaw": 90.0, "roll": 180.0, "floor": 0.0}],
+    "table": [{"mesh": "picnic_table_low_poly", "m": 0.75 / 3248, "yaw": 90.0, "roll": 180.0, "floor": 0.0}],
+    "cooler": [{"mesh": "cooler_box__BLEND_", "m": 0.01}],
+    "chair": [{"mesh": "chair_low_poly", "m": 0.01, "yaw": -90.0}],
+    "log": [{"mesh": "SM_FirewoodBlackCherryPiece01"}],
+    "woodpile": [{"mesh": "SM_FirewoodStackBlackCherry02", "m": 0.01}],
+    # a lantern standing on a tree stump; its ground patch sinks out of sight under the grass
+    "lantern_stump": [{"mesh": "woodsman_collection_railroad_lantern", "m": 0.32 / 1601, "floor": -1680.0,
+                       "light": (6.0, 2.0, 561.0)}],
+}
 
 
 def _actors():
@@ -55,6 +80,29 @@ def _exposure_bias(pp, on, bias):
     pp.set_editor_property("settings", s)
 
 
+def _find_models():
+    """The models in MODELS that this PC has: {item: [(spec, StaticMesh)]}."""
+    names = {spec["mesh"] for specs in MODELS.values() for spec in specs}
+    meshes = {}
+    ar = unreal.AssetRegistryHelpers.get_asset_registry()
+    for d in ar.get_assets_by_path("/Game", recursive=True):
+        name = str(d.asset_name)
+        if name in names and name not in meshes and str(d.asset_class_path.asset_name) == "StaticMesh":
+            meshes[name] = d.get_asset()
+    found = {}
+    for item, specs in MODELS.items():
+        have = [(spec, meshes[spec["mesh"]]) for spec in specs if spec["mesh"] in meshes]
+        if have:
+            found[item] = have
+    return found
+
+
+def _turn(v, yaw, roll):
+    """A model-space vector turned by roll (about X) then yaw (about Z), as an Unreal rotator does it."""
+    c, s = math.cos(math.radians(roll)), math.sin(math.radians(roll))
+    return _yaw([v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c], yaw)
+
+
 def _cd(real_cd, k):
     """A real light's candelas at the camp's scale: a real metre is 0.9144 k Unreal metres."""
     return real_cd * (0.9144 * k) ** 2
@@ -71,6 +119,8 @@ class Camp:
         self.time = 0.0
         self.rnd = random.Random(1234)
         self.saved = None     # the level's own lighting, put back by restore()
+        self.models = _find_models()
+        self.model_specs = {}    # mesh path -> its MODELS entry
 
     # ---------------- building ----------------
 
@@ -91,6 +141,34 @@ class Camp:
         (x towards its front, y to its right, z up)."""
         self.part(shape, color, _add(origin, _yaw(center, yaw)), size, _yaw(x_axis, yaw), _yaw(z_axis, yaw), glow)
 
+    def model(self, item, i, p, yaw, size=None, scale=None):
+        """Put variant i of a model at p (yards, on the ground), turned by yaw. It is drawn at its real size,
+        or fitted: size = ("z" or "w", metres) for its height or its widest side, or scale = metres per
+        model unit along its own [x, y, z]. Returns a function from a model point to yards."""
+        spec, mesh = self.models[item][i % len(self.models[item])]
+        b = mesh.get_bounds()
+        lo = [b.origin.x - b.box_extent.x, b.origin.y - b.box_extent.y, b.origin.z - b.box_extent.z]
+        hi = [b.origin.x + b.box_extent.x, b.origin.y + b.box_extent.y, b.origin.z + b.box_extent.z]
+        if scale is None:
+            m = spec.get("m")
+            if size:
+                ext = hi[2] - lo[2] if size[0] == "z" else max(hi[0] - lo[0], hi[1] - lo[1])
+                m = size[1] / ext
+            scale = [m, m, m]
+        cm = [v * self.k * gs.YARD_CM for v in scale]
+        turn_yaw, roll = spec.get("yaw", 0.0) + yaw, spec.get("roll", 0.0)
+        floor = spec.get("floor", hi[2] if roll == 180.0 else lo[2])
+
+        def at(q):
+            """A point on the model (its own units) -> yards on the range."""
+            d = [(q[j] - (floor if j == 2 else 0.0)) * cm[j] / gs.YARD_CM for j in range(3)]
+            return _add(p, _turn(d, turn_yaw, roll))
+        t = unreal.Transform(location=unreal.Vector(*gs.to_unreal(at([0.0, 0.0, 0.0]))),
+                             rotation=unreal.Rotator(roll=roll, pitch=0.0, yaw=turn_yaw), scale=unreal.Vector(*cm))
+        self.parts.setdefault(("model", mesh.get_path_name(), 0.0), []).append(t)
+        self.model_specs[mesh.get_path_name()] = spec
+        return at
+
     def build(self):
         c, k = self.c, self.k
         self.ground()
@@ -101,17 +179,29 @@ class Camp:
             self.tent(t)
         self.table(c["table"])
         self.cooler(c["cooler"])
-        for lg in c["logs"]:
+        for i, lg in enumerate(c["logs"]):
+            if "log" in self.models:    # a split log, stretched to the seat's length and thickness
+                b = self.models["log"][0][1].get_bounds().box_extent
+                r, ln = lg["r"] / k, lg["len"] / k
+                self.model("log", i, lg["p"], lg["yaw"], scale=[r / b.x, ln / (2 * b.y), r / b.z])
+                continue
             self.local("Cylinder", BARK, lg["p"], lg["yaw"], [0, 0, lg["r"] * 0.9],
                        [2 * lg["r"], 2 * lg["r"], lg["len"]],
                        z_axis=(0, 1, 0), x_axis=(0, 0, 1))
         wp = c["woodpile"]
-        for row, n in enumerate((6, 5, 4)):
-            for i in range(n):
-                at = [0, (i - (n - 1) / 2) * wp["r"] * 2.05, wp["r"] * (1 + row * 1.75)]
-                self.local("Cylinder", BARK, wp["p"], wp["yaw"], at,
-                           [2 * wp["r"], 2 * wp["r"], wp["len"]], z_axis=(1, 0, 0), x_axis=(0, 0, 1))
-        for s in c["stumps"]:
+        if "woodpile" in self.models:
+            self.model("woodpile", 0, wp["p"], wp["yaw"])
+        else:
+            for row, n in enumerate((6, 5, 4)):
+                for i in range(n):
+                    at = [0, (i - (n - 1) / 2) * wp["r"] * 2.05, wp["r"] * (1 + row * 1.75)]
+                    self.local("Cylinder", BARK, wp["p"], wp["yaw"], at,
+                               [2 * wp["r"], 2 * wp["r"], wp["len"]], z_axis=(1, 0, 0), x_axis=(0, 0, 1))
+        for i, s in enumerate(c["stumps"]):
+            if i == 0 and "lantern_stump" in self.models:    # the first stump has a lantern on it
+                at = self.model("lantern_stump", 0, s["p"], 30.0)
+                self.light("StumpLantern", at(self.models["lantern_stump"][0][0]["light"]), "#ffb46b", 3, 15)
+                continue
             self.part("Cylinder", BARK, _add(s["p"], [0, 0, s["h"] / 2]), [2 * s["r"], 2.2 * s["r"], s["h"]])
             self.part("Cylinder", "#a07a50", _add(s["p"], [0, 0, s["h"]]), [1.8 * s["r"], 1.8 * s["r"], 0.01 * k])
         for ch in c["chairs"]:
@@ -126,18 +216,36 @@ class Camp:
         r = c["clearing_r"] + 4 * k
         self.part("Cylinder", "#28331a", _add(c["center"], [0, 0, -0.012 * k]), [2 * r, 2 * r, 0.02 * k])
         r = c["clearing_r"] + 1.5 * k
-        self.part("Cylinder", "#29461f", _add(c["center"], [0, 0, -0.008 * k]), [2 * r, 2 * r, 0.02 * k])
+        lawn = _add(c["center"], [0, 0, -0.008 * k])
+        grass = garage_env.dressing()["grass"]
+        if grass:    # the Fab grass, tiled at its real size
+            a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(*gs.to_unreal(lawn)))
+            a.set_actor_label(CAMP + "Grass")
+            smc = a.static_mesh_component
+            smc.set_mobility(unreal.ComponentMobility.MOVABLE)
+            smc.set_static_mesh(unreal.load_asset(SHAPES + "Cylinder"))
+            a.set_actor_scale3d(unreal.Vector(*[v * gs.YARD_CM / 100.0 for v in (2 * r, 2 * r, 0.02 * k)]))
+            mid = smc.create_dynamic_material_instance(0, grass)
+            reps = 2 * r / (GRASS_TILE_M * k)
+            for tex in ("BaseColorTexture", "MetallicRoughnessTexture", "NormalTexture", "OcclusionTexture"):
+                mid.set_vector_parameter_value(tex + "_OffsetScale", unreal.LinearColor(0, 0, reps, reps))
+            mid.set_vector_parameter_value("BaseColorFactor", unreal.LinearColor(0.7, 0.7, 0.7, 1))
+        else:
+            self.part("Cylinder", "#29461f", lawn, [2 * r, 2 * r, 0.02 * k])
         f = c["fire"]
-        self.part("Cylinder", "#2e2b27", _add(f["p"], [0, 0, -0.006 * k]), [5.2 * f["r"], 5.2 * f["r"], 0.02 * k])
+        if "campfire" not in self.models:    # the stone ring brings its own ash
+            self.part("Cylinder", "#2e2b27", _add(f["p"], [0, 0, -0.006 * k]), [5.2 * f["r"], 5.2 * f["r"], 0.02 * k])
 
     def woods(self):
         c, k = self.c, self.k
         tiers = ((0.2, 0.44, 1.0), (0.38, 0.62, 0.8), (0.55, 0.8, 0.58), (0.72, 1.0, 0.36))
         blobs = ((0, 0.7, 0, 0.6, 0.24), (0.38, 0.6, 0.15, 0.42, 0.18), (-0.32, 0.62, -0.22, 0.45, 0.19),
                  (0.05, 0.88, 0.04, 0.4, 0.15), (-0.12, 0.56, 0.4, 0.4, 0.16))
-        for t in c["trees"]:
+        for i, t in enumerate(c["trees"]):
             p, h, r, yaw = t["p"], t["h"], t["r"], t["yaw"]
-            if t["kind"] == "pine":
+            if "tree" in self.models:    # real firs for every tree, pines and oaks alike
+                self.model("tree", i, p, yaw, size=("z", h / k))
+            elif t["kind"] == "pine":
                 leaf = _tint("#1d4428", t["tint"])
                 self.part("Cylinder", "#4a3828", _add(p, [0, 0, h * 0.45]), [0.1 * r, 0.1 * r, h * 0.9])
                 for b, top, rr in tiers:
@@ -151,18 +259,24 @@ class Camp:
         for b in c["bushes"]:
             self.part("Sphere", _tint("#2c5524", b["tint"]), _add(b["p"], [0, 0, 0.25 * b["r"]]),
                       [2 * b["r"], 2 * b["r"], 1.4 * b["r"]])
-        for rk in c["rocks"]:
+        for i, rk in enumerate(c["rocks"]):
+            if "rock" in self.models:
+                self.model("rock", i, rk["p"], rk["yaw"], size=("w", 2 * rk["r"] / k))
+                continue
             self.local("Sphere", _tint("#6a655d", 0.75 + self.rnd.random() * 0.4), rk["p"], rk["yaw"],
                        [0, 0, 0.12 * rk["r"]], [1.7 * rk["r"], 2 * rk["r"], 1.1 * rk["r"]])
 
     def fire(self):
         f, k, R = self.c["fire"], self.k, self.rnd
         p, r = f["p"], f["r"]
-        for i in range(12):
-            a = i / 12 * 2 * math.pi + R.random() * 0.2
-            sz = (0.11 + R.random() * 0.06) * k
-            self.local("Sphere", _tint("#6f6a62", 0.7 + R.random() * 0.4), p, math.degrees(a),
-                       [r, 0, sz * 0.4], [1.7 * sz, 2 * sz, 1.3 * sz])
+        stones = [(i / 12 * 2 * math.pi + R.random() * 0.2, (0.11 + R.random() * 0.06) * k, 0.7 + R.random() * 0.4)
+                  for i in range(12)]
+        if "campfire" in self.models:
+            self.model("campfire", 0, p, 0.0)
+        else:
+            for a, sz, tint in stones:
+                self.local("Sphere", _tint("#6f6a62", tint), p, math.degrees(a),
+                           [r, 0, sz * 0.4], [1.7 * sz, 2 * sz, 1.3 * sz])
         self.part("Cylinder", "#ff5a14", _add(p, [0, 0, 0.004 * k]), [1.6 * r, 1.6 * r, 0.02 * k], glow=4.0)
         for i in range(5):    # charred logs leaning in, a teepee
             a = i / 5 * 2 * math.pi + 0.3
@@ -207,15 +321,16 @@ class Camp:
 
     def lamps(self):
         c, k = self.c, self.k
-        # the lantern on the shepherd's hook, just off the left of the starting view: it lights the board
-        hk = c["hook"]
-        p, h, arm = hk["p"], hk["h"], hk["arm"]
-        self.part("Cylinder", METAL, _add(p, [0, 0, h / 2]), [0.026 * k, 0.026 * k, h])
-        self.part("Cube", METAL, _add(p, [0, arm / 2, h]), [0.015 * k, arm, 0.015 * k])
-        glass = _add(p, [0, arm, h - 0.16 * k])
-        self.part("Cylinder", METAL, _add(glass, [0, 0, 0.08 * k]), [0.004 * k, 0.004 * k, 0.16 * k])
-        self.lantern(glass, k)
-        self.light("HookLight", glass, "#ffb46b", 14, 25)
+        # lanterns on shepherd's hooks either side of the board, just out of the starting view: they light it
+        # (a server from before the second hook sends just the left one, as "hook")
+        for hk in c.get("hooks") or [dict(c["hook"], side=-1)]:
+            p, h, reach = hk["p"], hk["h"], -hk["side"] * hk["arm"]    # the arm reaches in towards the board
+            self.part("Cylinder", METAL, _add(p, [0, 0, h / 2]), [0.026 * k, 0.026 * k, h])
+            self.part("Cube", METAL, _add(p, [0, reach / 2, h]), [0.015 * k, hk["arm"], 0.015 * k])
+            glass = _add(p, [0, reach, h - 0.16 * k])
+            self.part("Cylinder", METAL, _add(glass, [0, 0, 0.08 * k]), [0.004 * k, 0.004 * k, 0.16 * k])
+            self.lantern(glass, k)
+            self.light("HookLight_%s" % ("L" if hk["side"] < 0 else "R"), glass, "#ffb46b", 14, 25)
         # string lights between two trees: a sagging wire with warm bulbs hanging off it
         pts = c["lights"]
         for a, b in zip(pts, pts[1:]):
@@ -233,6 +348,12 @@ class Camp:
         L, W, H, glow = t["l"], t["w"], t["h"], t.get("glow", 0.0) * 0.3
         # a lit tent glows faintly through its fabric and warmly at the door
         door, door_glow = ("#ff9a40", t["glow"] * 1.2) if t.get("glow") else ("#1a1410", 0.0)
+        if "tent" in self.models:
+            self.model("tent", 0, p, yaw)
+            if t.get("glow"):    # someone's lantern inside: a warm light at the door
+                self.light("TentLight_" + t["kind"], _add(p, _yaw([L * 0.55, 0, H * 0.35], yaw)),
+                           "#ffa04a", 1.5, 8)
+            return
         if t["kind"] == "dome":
             self.local("Sphere", t["color"], p, yaw, [0, 0, 0], [L, W, 2 * H], glow=glow)
             self.local("Sphere", door, p, yaw, [L / 2 * 0.93, 0, 0], [0.04 * k, W * 0.44, H * 1.24], glow=door_glow)
@@ -252,8 +373,12 @@ class Camp:
     def table(self, tb):
         k, p, yaw, wood = self.k, tb["p"], tb["yaw"], "#8a6440"
         L, W, H = tb["l"], tb["w"], tb["h"]
-        self.local("Cube", wood, p, yaw, [0, 0, H], [W, L, 0.045 * k])
-        for sd in (-1, 1):
+        if "table" in self.models:
+            self.model("table", 0, p, yaw)
+            H = 0.75 * k
+        else:
+            self.local("Cube", wood, p, yaw, [0, 0, H], [W, L, 0.045 * k])
+        for sd in (-1, 1) if "table" not in self.models else ():
             self.local("Cube", wood, p, yaw, [sd * (W / 2 + 0.3 * k), 0, tb["bench"]], [0.26 * k, L, 0.04 * k])
             for end in (-1, 1):    # A-frame legs: feet out under the benches, tops under the table
                 lean = sd * 0.5
@@ -265,12 +390,18 @@ class Camp:
 
     def cooler(self, cl):
         p, yaw = cl["p"], cl["yaw"]
+        if "cooler" in self.models:
+            self.model("cooler", 0, p, yaw)
+            return
         w, d, h = cl["size"]
         self.local("Cube", "#b8322a", p, yaw, [0, 0, h * 0.41], [d, w, h * 0.82])
         self.local("Cube", "#f0f0ea", p, yaw, [0, 0, h * 0.91], [d * 1.05, w * 1.03, h * 0.18])
 
     def chair(self, ch):
         p, yaw, s, cloth = ch["p"], ch["yaw"], ch["size"], ch["color"]
+        if "chair" in self.models:
+            self.model("chair", 0, p, yaw)
+            return
         self.local("Cube", cloth, p, yaw, [0, 0, 0.42 * s], [s * 0.85, s, 0.03 * s])
         tilt = 0.25    # the back leans away from the fire
         self.local("Cube", cloth, p, yaw, [-0.45 * s, 0, 0.85 * s], [0.03 * s, s, 0.95 * s],
@@ -286,19 +417,29 @@ class Camp:
     # ---------------- actors ----------------
 
     def spawn_parts(self):
-        """One instanced-mesh actor per (shape, colour, glow)."""
+        """One instanced-mesh actor per (shape, colour, glow), and one per model (with its own materials)."""
         sub = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
         lib = unreal.SubobjectDataBlueprintFunctionLibrary
         base = unreal.load_asset(COLOR_MATERIAL)
         for n, ((shape, color, glow), transforms) in enumerate(sorted(self.parts.items(), key=lambda kv: kv[0])):
             a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
-            a.set_actor_label("%s%s_%02d" % (CAMP, shape, n))
+            name = color.rsplit(".", 1)[-1] if shape == "model" else shape
+            a.set_actor_label("%s%s_%02d" % (CAMP, name, n))
             a.static_mesh_component.set_mobility(unreal.ComponentMobility.MOVABLE)
             root = sub.k2_gather_subobject_data_for_instance(a)[0]
             handle, _ = sub.add_new_subobject(unreal.AddNewSubobjectParams(
                 parent_handle=root, new_class=unreal.InstancedStaticMeshComponent))
             ism = lib.get_associated_object(lib.get_data(handle))
             ism.set_mobility(unreal.ComponentMobility.MOVABLE)
+            if shape == "model":    # (key is ("model", mesh path, 0))
+                spec = self.model_specs[color]
+                ism.set_static_mesh(unreal.load_asset(color))
+                ism.set_cast_shadow(spec.get("shadow", True))
+                if spec.get("cull_m"):
+                    far = int(spec["cull_m"] * self.k * gs.YARD_CM)
+                    ism.set_cull_distances(int(far * 0.8), far)
+                ism.add_instances(transforms, False, True)
+                continue
             ism.set_static_mesh(unreal.load_asset(SHAPES + shape))
             mid = ism.create_dynamic_material_instance(0, base)
             mid.set_vector_parameter_value("Color", garage_env.hex_color(color))
