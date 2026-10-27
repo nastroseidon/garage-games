@@ -1,8 +1,14 @@
-"""Builds the proof-of-concept range level (Content/Maps/Range) from code.
+"""Builds the Garage Games range level (Content/Maps/Range) from code.
 
-An empty range with one target (Blue, from TARGETS in the repo's games.py),
-a ball, the shot camera, and daylight. Safe to run again: it replaces
-everything it made before (actors named GG_...).
+The layout (all seven targets from the repo's games.py, mown stripes,
+yardage boards, light towers, a tree line and hills) comes from
+range_layout.py. If free Fab / Quixel trees, rocks or grass are on this PC
+(Content/Fab or Content/Megascans), they replace the simple shapes; see
+unreal/README.md. Lighting starts as night; switch with
+garage_env.set_time_of_day("day").
+
+Safe to run again: it replaces everything it made before (actors named
+GG_...).
 
 Run it in the editor: Tools > Execute Python Script... > build_range.py,
 or from a terminal with the editor open:
@@ -18,28 +24,28 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..",
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+import importlib  # noqa: E402
+
 import director  # noqa: E402  (repo root)
 import games  # noqa: E402
+import garage_env  # noqa: E402
 import garage_stream as gs  # noqa: E402
+import range_layout as R  # noqa: E402
+
+# the editor keeps imported modules in memory; pick up any edits since the last build
+for _m in (games, director, gs, R, garage_env):
+    importlib.reload(_m)
 
 MAP = "/Game/Maps/Range"
-ART = "/Game/Garage"
-TARGET = games.TARGETS[3]  # Blue, 120 yds
+ART = garage_env.ART
 YD = gs.YARD_CM
+START_LIGHTING = "night"
 
 assets = unreal.AssetToolsHelpers.get_asset_tools()
 mel = unreal.MaterialEditingLibrary
 eal = unreal.EditorAssetLibrary
 actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 levels = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
-
-
-def hex_color(h, scale=1.0):
-    h = h.lstrip("#")
-    r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
-    # sRGB -> linear, which is what material colors use
-    lin = [(c / 12.92) if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
-    return unreal.LinearColor(lin[0] * scale, lin[1] * scale, lin[2] * scale, 1.0)
 
 
 def base_material():
@@ -67,7 +73,8 @@ def base_material():
     return mat
 
 
-def material(name, color, glow=0.0, roughness=0.8):
+def material(key, hex_, glow=0.0, roughness=0.8):
+    name = "MI_" + key
     path = "%s/%s" % (ART, name)
     if eal.does_asset_exist(path):
         mi = unreal.load_asset(path)
@@ -75,29 +82,91 @@ def material(name, color, glow=0.0, roughness=0.8):
         mi = assets.create_asset(name, ART, unreal.MaterialInstanceConstant,
                                  unreal.MaterialInstanceConstantFactoryNew())
         mel.set_material_instance_parent(mi, base_material())
-    mel.set_material_instance_vector_parameter_value(mi, "Color", color)
+    mel.set_material_instance_vector_parameter_value(mi, "Color", garage_env.hex_color(hex_))
     mel.set_material_instance_scalar_parameter_value(mi, "Glow", glow)
     mel.set_material_instance_scalar_parameter_value(mi, "Roughness", roughness)
     eal.save_loaded_asset(mi)
     return mi
 
 
-def shape(label, mesh, mat, loc, scale, movable=False):
-    a = actors.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(*loc))
-    smc = a.static_mesh_component
-    if movable:
-        smc.set_mobility(unreal.ComponentMobility.MOVABLE)
-    smc.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/" + mesh))
-    smc.set_material(0, mat)
-    a.set_actor_scale3d(unreal.Vector(*scale))
-    a.set_actor_label(label)
+def all_materials():
+    mats = {k: material(k, *v) for k, v in R.MATERIALS.items()}
+    for i, T in enumerate(games.TARGETS):
+        mats[R.target_material(i)] = material(R.target_material(i), T["color"], 0.6, 0.5)
+        mats[R.target_inner_material(i)] = material(R.target_inner_material(i), T["color"], 0.2, 0.6)
+    mats["ball"] = material("ball", "#ffffff", 0.4, 0.3)
+    # tidy up material assets an older build made but this one doesn't use
+    # (names compare case-insensitively: Windows treats MI_White and MI_white as one file)
+    keep = {"m_garagecolor"} | {"mi_" + k.lower() for k in mats}
+    for path in eal.list_assets(ART, recursive=False):
+        if path.split(".")[-1].lower() not in keep:
+            eal.delete_asset(path)
+    return mats
+
+
+def mesh_height_cm(mesh):
+    return max(1.0, mesh.get_bounds().box_extent.z * 2)
+
+
+def spawn_mesh(p, mats, dressing, counters):
+    loc = [c * YD for c in p["pos"]]
+    rot = unreal.Rotator(roll=0, pitch=0, yaw=p.get("yaw", 0.0))
+    role = p.get("role")
+    pool = dressing.get(role) if role in ("tree", "rock") else None
+    if role == "trunk" and dressing.get("tree"):
+        return None  # a real tree brings its own trunk
+    if pool:
+        mesh = pool[counters.setdefault(role, 0) % len(pool)]
+        counters[role] += 1
+        a = actors.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(loc[0], loc[1], 0), rot)
+        a.static_mesh_component.set_static_mesh(mesh)
+        want = (p["size"][2] / 0.75 if role == "tree" else p["size"][2]) * YD  # cone is 3/4 of a tree's height
+        s = want / mesh_height_cm(mesh)
+        a.set_actor_scale3d(unreal.Vector(s, s, s))
+    else:
+        a = actors.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(*loc), rot)
+        smc = a.static_mesh_component
+        smc.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/" + p["mesh"]))
+        mat = mats[p["material"]]
+        if dressing.get("grass") and p["material"] in ("rough",):
+            mat = dressing["grass"]
+        smc.set_material(0, mat)
+        size = [max(v, 0.001) * YD / 100.0 for v in p["size"]]
+        if p["mesh"] == "Plane":
+            size[2] = 1.0
+        a.set_actor_scale3d(unreal.Vector(*size))
+    a.set_actor_label(p["name"])
     return a
 
 
-def disc(label, mat, d_yd, l_yd, radius_yd, height_cm, base_cm=0.0):
-    """A flat cylinder (the engine's cylinder is 100 cm wide and 100 cm tall, centred)."""
-    s = radius_yd * 2 * YD / 100.0
-    return shape(label, "Cylinder", mat, (d_yd * YD, l_yd * YD, base_cm + height_cm / 2), (s, s, height_cm / 100.0))
+def spawn_text(p):
+    loc = [c * YD for c in p["pos"]]
+    a = actors.spawn_actor_from_class(unreal.TextRenderActor, unreal.Vector(*loc),
+                                      unreal.Rotator(roll=0, pitch=0, yaw=p.get("yaw", 0.0)))
+    t = a.text_render
+    t.set_text(unreal.Text(p["text"]))
+    t.set_world_size(p["height"] * YD)
+    t.set_text_render_color(garage_env.srgb(p["color"]))
+    t.set_horizontal_alignment(unreal.HorizTextAligment.EHTA_CENTER)
+    t.set_vertical_alignment(unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
+    a.set_actor_label(p["name"])
+    return a
+
+
+def spawn_spot(p):
+    loc = [c * YD for c in p["pos"]]
+    a = actors.spawn_actor_from_class(unreal.SpotLight, unreal.Vector(*loc),
+                                      unreal.Rotator(roll=0, pitch=p["pitch"], yaw=p["yaw"]))
+    c = a.spot_light_component
+    c.set_mobility(unreal.ComponentMobility.MOVABLE)
+    c.set_editor_property("intensity_units", unreal.LightUnits.CANDELAS)
+    c.set_outer_cone_angle(p["cone"] / 2)
+    c.set_inner_cone_angle(p["cone"] / 4)
+    c.set_attenuation_radius(p["reach"] * YD)
+    c.set_light_color(garage_env.hex_color("#fff1d0"))
+    c.set_cast_shadows(False)  # eight shadowed spotlights cost a lot of frame time
+    a.set_actor_label(p["name"])
+    return a
 
 
 def build():
@@ -109,9 +178,8 @@ def build():
         if a.get_actor_label().startswith("GG_"):
             actors.destroy_actor(a)
 
-    # ---- light and sky ----
-    sun = actors.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 1000),
-                                        unreal.Rotator(roll=0, pitch=-38, yaw=-35))
+    # ---- sky, sun, fog, exposure ----
+    sun = actors.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 1000))
     sun.set_actor_label("GG_Sun")
     sun.light_component.set_mobility(unreal.ComponentMobility.MOVABLE)
     sun.light_component.set_editor_property("atmosphere_sun_light", True)
@@ -120,30 +188,30 @@ def build():
     sky.light_component.set_mobility(unreal.ComponentMobility.MOVABLE)
     sky.light_component.set_editor_property("real_time_capture", True)
     actors.spawn_actor_from_class(unreal.SkyAtmosphere, unreal.Vector(0, 0, 0)).set_actor_label("GG_SkyAtmosphere")
-    fog = actors.spawn_actor_from_class(unreal.ExponentialHeightFog, unreal.Vector(0, 0, 0))
-    fog.set_actor_label("GG_Fog")
+    actors.spawn_actor_from_class(unreal.ExponentialHeightFog, unreal.Vector(0, 0, 0)).set_actor_label("GG_Fog")
+    pp = actors.spawn_actor_from_class(unreal.PostProcessVolume, unreal.Vector(0, 0, 0))
+    pp.set_editor_property("unbound", True)
+    pp.set_actor_label("GG_PostProcess")
 
-    # ---- the range ----
-    grass = material("MI_Grass", hex_color("#2f7d3a"), roughness=0.95)
-    shape("GG_Ground", "Plane", grass, (135 * YD, 0, 0), (330 * YD / 100, 160 * YD / 100, 1))
-    shape("GG_TeeMat", "Cube", material("MI_TeeMat", hex_color("#3a3a3a")), (0, 0, 2), (1.5, 1.5, 0.04))
-
-    # ---- one target, from games.py ----
-    T = TARGET
-    rim = material("MI_Target_" + T["name"], hex_color(T["color"]), glow=0.6, roughness=0.5)
-    inner = material("MI_Target_%s_Inner" % T["name"], hex_color(T["color"], 0.55), glow=0.2)
-    disc("GG_Target", rim, T["d"], T["l"], T["r"], 6)
-    disc("GG_TargetInner", inner, T["d"], T["l"], T["r"] * games.INNER, 4, base_cm=6)
-    disc("GG_TargetCenter", rim, T["d"], T["l"], games.CENTER, 3, base_cm=10)
-    pin_h = 350
-    shape("GG_FlagPin", "Cylinder", material("MI_White", hex_color("#f2f2f2")),
-          (T["d"] * YD, T["l"] * YD, pin_h / 2), (0.04, 0.04, pin_h / 100.0))
-    shape("GG_Flag", "Cube", material("MI_Flag", hex_color("#ff3b3b"), glow=0.3),
-          (T["d"] * YD, T["l"] * YD + 45, pin_h - 30), (0.02, 0.9, 0.6))
+    # ---- the range, from range_layout.py ----
+    mats = all_materials()
+    dressing = garage_env.dressing()
+    counters = {}
+    for p in R.layout(games.TARGETS, games.INNER, games.CENTER):
+        if p["kind"] == "mesh":
+            spawn_mesh(p, mats, dressing, counters)
+        elif p["kind"] == "text":
+            spawn_text(p)
+        elif p["kind"] == "spot":
+            spawn_spot(p)
 
     # ---- the ball and the shot camera (garage_bridge.py moves these) ----
-    shape("GG_Ball", "Sphere", material("MI_Ball", hex_color("#ffffff"), glow=0.4, roughness=0.3),
-          (0, 0, 2.7), (0.054, 0.054, 0.054), movable=True)
+    ball = actors.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 2.7))
+    ball.static_mesh_component.set_mobility(unreal.ComponentMobility.MOVABLE)
+    ball.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Sphere"))
+    ball.static_mesh_component.set_material(0, mats["ball"])
+    ball.set_actor_scale3d(unreal.Vector(0.054, 0.054, 0.054))
+    ball.set_actor_label("GG_Ball")
     idle = director.idle_camera()
     pos, look = gs.to_unreal(idle["pos"]), gs.to_unreal(idle["look"])
     pitch, yaw, roll = gs.look_rotation(pos, look)
@@ -153,10 +221,12 @@ def build():
     cam.camera_component.set_editor_property("constrain_aspect_ratio", False)
     cam.camera_component.set_field_of_view(gs.horizontal_fov(idle["fov"]))
 
+    garage_env.set_time_of_day(START_LIGHTING, save=False)
     levels.save_current_level()
     eal.save_directory(ART)
     levels.pilot_level_actor(cam)
-    unreal.log("[Garage Games] range built: %s target at %d yds" % (T["name"], T["d"]))
+    unreal.log("[Garage Games] range built: %d targets, %s lighting, %d Fab trees, %d Fab rocks" % (
+        len(games.TARGETS), START_LIGHTING, len(dressing["tree"]), len(dressing["rock"])))
 
 
 build()
