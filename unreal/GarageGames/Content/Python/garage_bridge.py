@@ -110,6 +110,11 @@ class CornholeSet:
             h = board["back"][2] - 1.5 * fr   # up to the underside of the frame
             self._place(leg, [board["back"][0] - 1.5 * fr, side * W * 0.42, h / 2], [fr * 0.8, fr * 0.8, h])
         self.bag_size = (board["bag"], board["bag_t"])
+        # all 8 bags up front: spawning them mid-throw stalls a frame
+        while len(self.bags) < 8:
+            actor, mid = self._spawn(CH + "Bag_%02d" % len(self.bags), "Cube", "#ffffff")
+            _hide(actor, True)
+            self.bags.append((actor, mid))
         for a in _actors().get_all_level_actors():
             if a.get_actor_label().startswith("GG_Target_"):
                 _hide(a, True)
