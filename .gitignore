@@ -33,9 +33,14 @@ UE_*/
 Engine/Binaries/
 Engine/Source/
 
-# Never commit paid Fab / Marketplace / Quixel content: their licenses don't
-# allow sharing it in a public repo. Fab and Quixel Bridge import into these
-# folders by default; put any other third-party content in Content/ThirdParty/.
+# Never commit Fab / Marketplace / Quixel content: their licenses don't allow
+# sharing it in a public repo. Fab packs land in folders named after the pack
+# (Content/PSG_LTX/, ...), so the project's Content/ is an allow-list: only our
+# own folders are committed, anything else under Content/ stays on this PC.
+unreal/GarageGames/Content/*
+!unreal/GarageGames/Content/Garage/
+!unreal/GarageGames/Content/Maps/
+!unreal/GarageGames/Content/Python/
 unreal/**/Content/Fab/
 unreal/**/Content/Megascans/
 unreal/**/Content/MSPresets/

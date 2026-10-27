@@ -32,6 +32,8 @@ IGNORED = [
     UE + "Content/Megascans/Surfaces/Grass/T_Grass_D.uasset",
     UE + "Content/ThirdParty/Trees/SM_Oak.uasset",
     UE + "Content/StarterContent/Props/SM_Chair.uasset",
+    UE + "Content/PSG_LTX/StaticMeshes/SM_PSG_Abies_lasiocarpa001.uasset",  # Fab packs get their own folder
+    UE + "Content/SomePack/Textures/T_Grass.uasset",
     UE + "Plugins/Marketplace/CoolPack/CoolPack.uplugin",
     "UE_5.8/Engine/Binaries/Win64/UnrealEditor.exe",
     "UnrealEngine/Engine/Source/Runtime/Core/Core.Build.cs",

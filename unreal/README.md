@@ -10,9 +10,13 @@ VTrack ──Open Connect──▶ server.py ──/events (live stream)──�
                                                             └──▶ Unreal editor (garage_bridge.py)
 ```
 
-What's in the proof of concept: an empty range, one target (Blue, 120 yds),
-a ball flying the real shot's path with a tracer, and the broadcast camera
-cuts (tee, tower, target, orbit).
+What's in it: the full range with all seven targets (from `games.py`), mown
+stripes, yardage boards, light towers, a tree line and hills; **day and
+night lighting** you can switch between; and a ball flying the real shot's
+path with a tracer and the broadcast camera cuts (tee, tower, target,
+orbit). Everything is built from code with simple shapes, and free **Fab /
+Quixel** trees, rocks and grass are used instead when they are on the PC
+(see below).
 
 It runs inside the **Unreal editor** (no C++ and no Visual Studio needed).
 A standalone Unreal app that runs without the editor would need a small C++
@@ -39,6 +43,71 @@ part later; it can read the same live stream.
    back.
 
 The browser stays the scoreboard and control panel (players, undo, skip).
+
+## Day or night
+
+The range opens at night. To switch, in the Output Log switch the command
+box from **Cmd** to **Python** and type:
+
+```
+import garage_env; garage_env.set_time_of_day("day")
+```
+
+(or `"night"`). The choice is saved with the level. The settings for each
+(sun, tower lights, target glow, fog colour, exposure) are in `LIGHTING` at
+the bottom of `Content/Python/range_layout.py`.
+
+## Add free Fab / Quixel trees, rocks and grass (optional)
+
+The simple cone trees and round rocks are placeholders. Real ones from Fab
+look much better. Fab assets **stay on this PC only**: their licence doesn't
+allow them in the public repo, and `.gitignore` keeps them out. Anyone else
+who clones the repo repeats these steps (or keeps the simple shapes).
+
+1. In the Unreal editor, open Fab: *Window → Fab*. (Or in the Content
+   Browser: *+ Add → Add Fab Content*.)
+2. Sign in with your Epic Games account if asked.
+3. Search for what you want and filter to **Free**. Good searches:
+   *"pine tree"*, *"conifer"*, *"bush"*, *"rock"* or *"boulder"*, and a ground
+   surface such as *"grass"* or *"lawn"*. Check each item says it can be
+   used in Unreal Engine. Some Megascans are paid now; anything already in
+   your Fab library stays usable.
+   Megascans' free tier is *"UEFN – Reference only"*, which is for Fortnite
+   projects, not this one, so a Megascans item needs a paid licence.
+4. Click **Add to Project** (or *Download*, then *Add to Project*). Pick a
+   **Medium** quality to keep it fast. Fab imports into `Content/Fab/` or a
+   folder named after the pack (e.g. `Content/PSG_LTX/`). Either is fine:
+   only our own folders (`Garage`, `Maps`, `Python`) are committed, and the
+   build looks in every other folder.
+5. Rebuild the range: *Tools → Execute Python Script...* → choose
+   `Content/Python/build_range.py`. The Output Log shows what it found, e.g.
+   `dressing: 3 tree meshes, 2 rock meshes, grass material: MI_Grass_Lawn`.
+   Trees replace the cones and rocks replace the round stones. The grass
+   material goes on the mown stripes, the tee and the rough, tiled every
+   2 yards and tinted per area (the tiled copies go in `Content/GarageLocal/`,
+   also never committed).
+
+Asset names decide where they go: names containing *tree, pine, oak, fir,
+spruce, birch, maple, conifer, bush, shrub, hedge* or a tree genus (*abies,
+picea, pinus, larix, quercus, betula*) become trees; *rock, boulder, stone,
+cliff* become rocks; a material with *grass, lawn, turf, meadow* becomes the
+grass.
+
+Before committing `Content/Maps/Range.umap`, build it without Fab content so
+a fresh clone opens cleanly. Run this in the editor's Python console (or
+`tools/unreal_exec.py -c`) and then build:
+
+```python
+import os; os.environ["GG_NO_FAB"] = "1"
+```
+
+Set it back to `"0"` and build again to get the Fab look back.
+
+What this PC uses (for credit; none of it is in the repo):
+
+- *PSG – Realistic Abies lasiocarpa* by Studio LTX (Fab Standard License).
+- *025_Grass* by NoblesseOblige-No.1, licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## Check it runs smoothly (with the VTrack software running)
 
@@ -79,9 +148,12 @@ new project:
 | `GarageGames/Content/Python/init_unreal.py` | Runs when the project opens; starts the shot bridge |
 | `GarageGames/Content/Python/garage_bridge.py` | The Unreal part: moves the ball and camera every frame |
 | `GarageGames/Content/Python/garage_stream.py` | Plain Python (tested in `tests/test_unreal_stream.py`): the live-stream client, shot plan playback, Unreal units |
-| `GarageGames/Content/Python/build_range.py` | Builds the Range level and its materials from code |
+| `GarageGames/Content/Python/range_layout.py` | Plain Python (tested in `tests/test_range_layout.py`): what the range is made of, and the day/night settings |
+| `GarageGames/Content/Python/build_range.py` | Builds the Range level and its materials from the layout |
+| `GarageGames/Content/Python/garage_env.py` | Switches day/night; finds Fab / Quixel assets to use |
 | `GarageGames/Content/Maps/`, `Content/Garage/` | The level and materials it built (stored in Git LFS) |
 | `../tools/unreal_exec.py` | Runs a Python file or command in the open editor |
+| `../tools/unreal_snapshot.py` | Saves a screenshot from a chosen camera position (run it with `unreal_exec.py`) |
 
 ### Rebuild or change the range
 
