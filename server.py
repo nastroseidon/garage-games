@@ -17,8 +17,11 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import director
+import games
 from flight import simulate
 from openconnect import OpenConnectServer
+from session import GameSession
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
@@ -80,18 +83,26 @@ class ShotLog:
 
 hub = Hub()
 shot_log = ShotLog(enabled=True)
+session = GameSession()
 _shot_counter = 0
-_shot_lock = threading.Lock()
+_shot_lock = threading.Lock()   # also guards `session`
+
+
+def publish_state(reason):
+    with _shot_lock:
+        state = session.snapshot()
+    hub.publish("state", dict(state, reason=reason))
 
 
 def handle_shot(shot, raw=None, source="launch_monitor"):
     global _shot_counter
+    flight = simulate(shot["speed_mph"], shot["vla_deg"], shot["hla_deg"],
+                      shot["spin_rpm"], shot["spin_axis_deg"])
     with _shot_lock:
         _shot_counter += 1
         shot_id = _shot_counter
-    flight = simulate(shot["speed_mph"], shot["vla_deg"], shot["hla_deg"],
-                      shot["spin_rpm"], shot["spin_axis_deg"])
-    event = dict(shot, id=shot_id, source=source, flight=flight)
+        full = dict(shot, id=shot_id, source=source, flight=flight)
+        event = session.apply_shot(full)
     shot_log.write("shot", {"source": source, "shot": shot,
                             "carry_yd": flight["carry_yd"],
                             "offline_yd": flight["offline_yd"]})
@@ -149,6 +160,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._events()
         if path == "/api/status":
             return self._json(200, hub.status)
+        if path == "/api/games":
+            return self._json(200, {"games": [g.info() for g in games.GAMES],
+                                    "targets": games.TARGETS, "inner": games.INNER,
+                                    "center": games.CENTER,
+                                    "idle_camera": director.idle_camera()})
+        if path == "/api/state":
+            with _shot_lock:
+                return self._json(200, session.snapshot())
         if path == "/":
             path = "/index.html"
         full = os.path.realpath(os.path.join(WEB_DIR, path.lstrip("/")))
@@ -166,17 +185,39 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != "/api/test-shot":
-            return self._json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length") or 0)
         try:
             opts = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(opts, dict):
                 raise ValueError("expected an object")
-            shot = random_test_shot(opts)
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+        if self.path == "/api/test-shot":
+            try:
+                if not opts.get("kind"):
+                    with _shot_lock:
+                        opts["kind"] = session.test_kind()
+                shot = random_test_shot(opts)
+            except (ValueError, TypeError) as exc:
+                return self._json(400, {"error": str(exc)})
+            handle_shot(shot, source="test")
+            return self._json(200, {"ok": True})
+        actions = {
+            "/api/game/start": lambda: session.start(opts.get("game"), opts.get("players"),
+                                                     opts.get("rounds"), opts.get("camera")),
+            "/api/game/undo": session.undo,
+            "/api/game/skip": session.skip,
+            "/api/game/end": session.end,
+            "/api/settings": lambda: session.set_camera(opts.get("camera")),
+        }
+        if self.path not in actions:
+            return self._json(404, {"error": "not found"})
+        try:
+            with _shot_lock:
+                actions[self.path]()
         except (ValueError, TypeError) as exc:
             return self._json(400, {"error": str(exc)})
-        handle_shot(shot, source="test")
+        publish_state(self.path.rsplit("/", 1)[1])
         return self._json(200, {"ok": True})
 
     def _events(self):
@@ -186,8 +227,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         q = hub.subscribe()
         try:
-            self.wfile.write(("event: status\ndata: %s\n\n" %
-                              json.dumps(hub.status)).encode("utf-8"))
+            with _shot_lock:
+                state = dict(session.snapshot(), reason="sync")
+            self.wfile.write(("event: status\ndata: %s\n\nevent: state\ndata: %s\n\n" %
+                              (json.dumps(hub.status), json.dumps(state))).encode("utf-8"))
             self.wfile.flush()
             while True:
                 try:

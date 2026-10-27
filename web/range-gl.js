@@ -43,6 +43,7 @@ class RangeGL {
     this.targets = opts.targets;
     this.inner = opts.inner;
     this.center = opts.center;
+    this.idleCamera = opts.idleCamera;
     this.high = opts.quality !== "low";
 
     const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -404,7 +405,7 @@ class RangeGL {
     }
   }
 
-  /* frame: {now (ms), plan, wall (s), shot, shotId, color, highlight, markers:[{p,color}]} */
+  /* frame: {now (ms), plan (GarageShotPlan.player), wall (s), shot, shotId, color, highlight, markers:[{p,color}]} */
   render(frame) {
     const now = frame.now;
     const dt = clamp((now - (this.lastNow || now)) / 1000, 0, 0.1);
@@ -435,21 +436,15 @@ class RangeGL {
       }
     }
 
-    // camera
+    // camera (the server's plan already includes the camera smoothing)
     let cam;
     if (plan) {
-      const idx = plan.shotIndexAt(frame.wall);
-      cam = plan.camera(idx, frame.wall, ballPos);
-      const key = frame.shotId + ":" + idx;
-      const cut = key !== this.camKey;
-      this.camKey = key;
-      const want = toV(cam.pos), look = toV(cam.look);
-      if (cut || !cam.follow) this.camera.position.copy(want);
-      else this.camera.position.lerp(want, 1 - Math.exp(-cam.follow * dt));
-      if (cut || !cam.lookFollow) this.look.copy(look);
-      else this.look.lerp(look, 1 - Math.exp(-cam.lookFollow * dt));
+      cam = plan.camera(frame.wall);
+      this.camKey = frame.shotId + ":" + cam.cut;
+      this.camera.position.copy(toV(cam.pos));
+      this.look.copy(toV(cam.look));
     } else {
-      cam = window.GarageDirector.idleCamera();
+      cam = { pos: this.idleCamera.pos.slice(), look: this.idleCamera.look.slice(), fov: this.idleCamera.fov };
       cam.pos[1] += Math.sin(now / 9000) * 3;
       cam.pos[2] += Math.sin(now / 7000) * 1.2;
       const key = "idle";

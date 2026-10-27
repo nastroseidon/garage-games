@@ -1,8 +1,16 @@
-/* Garage Games screen: setup, turns, scoring, and drawing. */
+/* Garage Games screen: setup, scoreboard, and drawing.
+ *
+ * The game itself (turns, scoring, undo, the camera director) runs in the
+ * Python server, so every screen shows the same game. This page sends
+ * commands (start, undo, skip, ...) and draws the state and shot plans the
+ * server sends back. web/games.js is only used here for drawing.
+ */
 (function () {
   "use strict";
 
-  var GAMES = window.GarageGames.GAMES;
+  var DRAW = {};          // game id -> drawing helpers from web/games.js
+  window.GarageGames.GAMES.forEach(function (g) { DRAW[g.id] = g; });
+  var catalog = { games: [] };  // from /api/games: the games, targets and idle camera
   var COLORS = ["#ffd23f", "#ff6b6b", "#4ea8ff", "#3ddc84", "#c77dff", "#ff9f1c", "#2ec4b6", "#f15bb5"];
   var ROUND_CHOICES = [3, 5, 10];
   var BANNER_MS = 3500;
@@ -12,9 +20,9 @@
   var g2 = canvas.getContext("2d");
 
   var players = loadPlayers();
-  var selectedGame = GAMES[0];
+  var selectedGame = null;
   var rounds = 5;
-  var ctx = null;        // the running game
+  var ctx = null;        // the running game: {info, game (drawing helpers), state (from the server), players, history, board}
   var replay = null;     // {rec, start, until} - the shot currently being shown
   var soundOn = true;
   var bannerTimer = null;
@@ -82,7 +90,7 @@
   function renderGameCards() {
     var box = $("game-cards");
     box.innerHTML = "";
-    GAMES.forEach(function (game) {
+    catalog.games.forEach(function (game) {
       var b = el("button", "game-card" + (game === selectedGame ? " selected" : ""));
       b.appendChild(el("div", "emoji", game.emoji));
       b.appendChild(el("div", "gname", game.name));
@@ -95,9 +103,10 @@
   function renderRounds() {
     var box = $("rounds");
     box.innerHTML = "";
-    box.parentElement.style.visibility = selectedGame.usesRounds === false ? "hidden" : "visible";
-    var choices = selectedGame.roundChoices || ROUND_CHOICES;
-    if (choices.indexOf(rounds) < 0) rounds = selectedGame.defaultRounds || choices[1];
+    if (!selectedGame) return;
+    box.parentElement.style.visibility = selectedGame.uses_rounds === false ? "hidden" : "visible";
+    var choices = selectedGame.round_choices || ROUND_CHOICES;
+    if (choices.indexOf(rounds) < 0) rounds = selectedGame.default_rounds || choices[1];
     choices.forEach(function (n) {
       var b = el("button", n === rounds ? "selected" : "", String(n));
       b.onclick = function () { rounds = n; renderRounds(); };
@@ -111,7 +120,10 @@
       box.innerHTML = "";
       o[1].forEach(function (choice) {
         var b = el("button", settings[o[2]] === choice[0] ? "selected" : "", choice[1]);
-        b.onclick = function () { settings[o[2]] = choice[0]; saveSettings(); renderOptions(); };
+        b.onclick = function () {
+          settings[o[2]] = choice[0]; saveSettings(); renderOptions();
+          if (o[2] === "camera") api("/api/settings", { camera: choice[0] });
+        };
         box.appendChild(b);
       });
     });
@@ -131,122 +143,85 @@
 
   $("btn-start").onclick = function () { startGame(selectedGame); };
 
-  /* ---------------- game state ---------------- */
-  function startGame(game) {
-    var need = game.minPlayers || 1;
+  /* ---------------- talking to the server ---------------- */
+  function api(path, body) {
+    return fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || "request failed");
+        return data;
+      });
+    });
+  }
+
+  function infoFor(id) {
+    return catalog.games.filter(function (g) { return g.id === id; })[0];
+  }
+
+  /* ---------------- game state (owned by the server) ---------------- */
+  function startGame(info) {
+    if (!info) return;
+    var need = info.min_players || 1;
     if (players.length < need) {
-      $("setup-error").textContent = game.name + " needs at least " + need + " player" + (need > 1 ? "s" : "") + ".";
+      $("setup-error").textContent = info.name + " needs at least " + need + " player" + (need > 1 ? "s" : "") + ".";
       return;
     }
     $("setup-error").textContent = "";
-    ctx = {
-      game: game,
-      players: players.map(function (p) { return Object.assign({}, p); }),
-      rounds: rounds,
-      history: [],
-      targets: [],
-      turn: 0
-    };
-    if (game.reset) game.reset(ctx);
-    replay = null;
-    clearBroadcast();
-    hideOverlay();
-    showScreen("game");
-    $("game-title").textContent = game.emoji + " " + game.name;
-    $("last-shot").innerHTML = "";
-    renderSide();
+    api("/api/game/start", {
+      game: info.id, rounds: rounds, camera: settings.camera,
+      players: players.map(function (p) { return { name: p.name, junior: !!p.junior, color: p.color }; })
+    }).catch(function (e) { $("setup-error").textContent = e.message; });
+  }
+
+  // Keep the local view of the game in step with the server's state.
+  function applyState(state) {
+    if (!state.active) { ctx = null; return; }
+    if (!ctx || ctx.state.game !== state.game) {
+      ctx = { info: infoFor(state.game), game: DRAW[state.game] };
+    }
+    ctx.state = state;
+    ctx.players = state.players;
+    ctx.history = state.history;
+    ctx.board = state.board;
+    ctx.rounds = state.rounds;
+  }
+
+  function onState(state) {
+    if (state.camera && state.camera !== settings.camera) {
+      settings.camera = state.camera; saveSettings(); renderOptions();
+    }
+    var wasPlaying = !!ctx;
+    applyState(state);
+    if (!ctx) {
+      replay = null;
+      clearBroadcast();
+      hideOverlay();
+      if (wasPlaying || state.reason === "sync") { showScreen("setup"); renderPlayers(); }
+      return;
+    }
+    if (state.reason === "start" || state.reason === "sync" || state.reason === "undo" || !wasPlaying) {
+      replay = null;
+      clearBroadcast();
+      hideOverlay();
+      hideBanner();
+      showScreen("game");
+      $("game-title").textContent = ctx.info.emoji + " " + ctx.info.name;
+      $("last-shot").innerHTML = "";
+      renderSide();
+      if (state.over) setTimeout(showWinner, 300);
+    } else if (state.reason === "skip") {
+      replay = null;
+      afterTurn();
+    }
   }
 
   function playerCount() { return ctx.players.length; }
+  function isOver() { return ctx.state.over; }
 
-  function playerIdxForTurn(turn) {
-    return ctx.game.playerForTurn ? ctx.game.playerForTurn(ctx, turn) : turn % playerCount();
-  }
-
-  function roundOf(turn) {
-    return ctx.game.usesRounds === false ? 0 : Math.floor(turn / playerCount());
-  }
-
-  function targetFor(idx, turn) {
-    var r = roundOf(turn);
-    if (!ctx.targets[r]) ctx.targets[r] = ctx.game.makeTarget(r);
-    return ctx.game.playerTarget(ctx.targets[r], ctx.players[idx]);
-  }
-
-  function isOver() {
-    if (ctx.game.isOver) return ctx.game.isOver(ctx);
-    return ctx.turn >= ctx.rounds * playerCount();
-  }
-
-  function applyShot(shot) {
-    var idx = playerIdxForTurn(ctx.turn);
-    var target = targetFor(idx, ctx.turn);
-    var result = ctx.game.score(shot, target, ctx.players[idx], ctx, idx);
-    var rec = { turn: ctx.turn, idx: idx, shot: shot, target: target, result: result };
-    ctx.history.push(rec);
-    ctx.turn++;
-    return rec;
-  }
-
-  function skipTurn() {
-    if (!ctx || isOver()) return;
-    var idx = playerIdxForTurn(ctx.turn);
-    ctx.history.push({
-      turn: ctx.turn, idx: idx, shot: null, target: targetFor(idx, ctx.turn),
-      result: { points: ctx.game.missPoints, what: "Skipped", detail: "", great: false }
-    });
-    ctx.turn++;
-    replay = null;
-    afterTurn();
-  }
-
-  function undo() {
-    if (!ctx || !ctx.history.length) return;
-    ctx.history.pop();
-    // Rebuild any game state (e.g. the tic-tac-toe board) by replaying shots.
-    if (ctx.game.reset) {
-      var saved = ctx.history;
-      ctx.game.reset(ctx);
-      saved.forEach(function (rec) {
-        if (rec.shot) ctx.game.score(rec.shot, rec.target, ctx.players[rec.idx], ctx, rec.idx);
-      });
-    }
-    ctx.turn = ctx.history.length;
-    replay = null;
-    clearBroadcast();
-    hideOverlay();
-    hideBanner();
-    $("last-shot").innerHTML = "";
-    renderSide();
-  }
-
-  function standings() {
-    var game = ctx.game;
-    return ctx.players.map(function (p, i) {
-      var vals = ctx.history.filter(function (r) { return r.idx === i; })
-        .map(function (r) { return r.result.points; });
-      var total = game.combine === "max"
-        ? (vals.length ? Math.max.apply(null, vals) : 0)
-        : vals.reduce(function (a, b) { return a + b; }, 0);
-      return { idx: i, name: p.name, color: p.color, junior: p.junior, total: total, shots: vals.length };
-    }).sort(function (a, b) {
-      if (!a.shots !== !b.shots) return a.shots ? -1 : 1;
-      return game.lowerIsBetter ? a.total - b.total : b.total - a.total;
-    });
-  }
-
-  function scoreboardRows() {
-    var current = playerIdxForTurn(ctx.turn);
-    if (ctx.game.scoreboard) return ctx.game.scoreboard(ctx, current);
-    return standings().map(function (s) {
-      return {
-        name: s.name + (s.junior ? " (Jr)" : ""), color: s.color,
-        value: s.shots ? ctx.game.formatScore(s.total) : "—",
-        sub: s.shots + " shot" + (s.shots === 1 ? "" : "s"),
-        current: s.idx === current
-      };
-    });
-  }
+  function skipTurn() { if (ctx && !isOver()) api("/api/game/skip"); }
+  function undo() { if (ctx && ctx.history.length) api("/api/game/undo"); }
 
   function renderBoard(list, rows, numbered) {
     list.innerHTML = "";
@@ -265,18 +240,12 @@
 
   function renderSide() {
     if (!ctx) return;
-    var idx = playerIdxForTurn(ctx.turn);
-    var p = ctx.players[idx];
-    var t = targetFor(idx, ctx.turn);
-    $("up-name").textContent = p.name;
-    $("up-name").style.color = p.color;
-    $("up-task").textContent = ctx.game.task(t, p, ctx, idx);
-    if (ctx.game.usesRounds === false) {
-      $("round-info").textContent = "BOARD " + (ctx.boards || 1);
-    } else {
-      $("round-info").textContent = "ROUND " + Math.min(ctx.rounds, roundOf(ctx.turn) + 1) + " OF " + ctx.rounds;
-    }
-    renderBoard($("scoreboard"), scoreboardRows(), !ctx.game.scoreboard);
+    var s = ctx.state, cur = s.current;
+    $("up-name").textContent = cur.name;
+    $("up-name").style.color = cur.color;
+    $("up-task").textContent = cur.task;
+    $("round-info").textContent = s.round_info;
+    renderBoard($("scoreboard"), s.scoreboard, s.numbered);
   }
 
   function renderLastShot(shot) {
@@ -289,7 +258,7 @@
       ["Carry", f.carry_yd.toFixed(1) + " yds"],
       ["Offline", Math.abs(f.offline_yd).toFixed(1) + " " + (f.offline_yd >= 0 ? "R" : "L")]
     ];
-    if (ctx && ctx.game.view === "range3d" && f.total_yd) items.push(["Total (with roll)", f.total_yd.toFixed(1) + " yds"]);
+    if (ctx && ctx.info.view === "range3d" && f.total_yd) items.push(["Total (with roll)", f.total_yd.toFixed(1) + " yds"]);
     if (shot.club_speed_mph) {
       items.push(["Club speed", shot.club_speed_mph.toFixed(1) + " mph"]);
       items.push(["Smash", (shot.speed_mph / shot.club_speed_mph).toFixed(2)]);
@@ -310,24 +279,21 @@
   }
 
   /* ---------------- shots ---------------- */
-  function onShot(shot) {
-    if (!ctx || $("winner").classList.contains("show")) {
+  function onShot(ev) {
+    var shot = ev.shot;
+    if (ev.free || !ctx) {
       $("free-shot").textContent = "Last shot: " + shot.speed_mph.toFixed(1) + " mph, " +
         shot.flight.carry_yd.toFixed(1) + " yds carry (start a game to score it)";
       sound("blip");
       return;
     }
-    if (isOver()) return;
-    var rec = applyShot(shot);
+    applyState(ev.state);
+    var rec = { turn: ev.turn, idx: ev.idx, shot: shot, target: ev.target, result: ev.result,
+      highlight: ev.highlight, scores: ev.scores };
     var now = performance.now();
     clearBroadcast();
-    if (ctx.game.view === "range3d" && glRenderer()) {
-      var G = window.GarageGames;
-      var hit = G.rangeHit(shot);
-      var drama = window.GarageDirector.assess(dramaInput(rec, hit, shot));
-      var plan = window.GarageDirector.plan(shot, rec.result, {
-        style: settings.camera, drama: drama, hit: hit, targets: G.TARGETS
-      });
+    if (ev.plan && glRenderer()) {
+      var plan = window.GarageShotPlan.player(ev.plan);
       replay = { rec: rec, start: now, dur: plan.totalMs, until: now + plan.totalMs, plan: plan };
       if (plan.mode === "broadcast") runBroadcast(rec, plan);
       else later(plan.restMs, function () { showBanner(rec); });
@@ -338,40 +304,13 @@
       return;
     }
     renderLastShot(shot);
-    var dur = ctx.game.animMs ? ctx.game.animMs(shot, rec.result)
-      : Math.min(2200, Math.max(900, shot.flight.flight_time_s * 450));
+    var dur = ctx.game.animMs ? ctx.game.animMs(shot, rec.result) : ev.anim_ms;
     replay = { rec: rec, start: now, dur: dur, until: now + dur + BANNER_MS };
-    setTimeout(function () { showBanner(rec); }, ctx.game.view === "speed" ? 900 : dur);
+    setTimeout(function () { showBanner(rec); }, ctx.info.view === "speed" ? 900 : dur);
     afterTurn();
   }
 
   /* ---------------- broadcast moments ---------------- */
-  function totalsFrom(history) {
-    var t = ctx.players.map(function () { return 0; });
-    history.forEach(function (r) { t[r.idx] += r.result.points; });
-    return t;
-  }
-
-  function dramaInput(rec, hit, shot) {
-    var G = window.GarageGames;
-    var round = roundOf(rec.turn);
-    return {
-      players: ctx.players,
-      shooter: rec.idx,
-      before: totalsFrom(ctx.history.slice(0, -1)),
-      after: totalsFrom(ctx.history),
-      shotsLeft: ctx.rounds - round,
-      totalShots: ctx.rounds,
-      finalBall: ctx.game.id === "targetrange" && round === ctx.rounds - 1,
-      pressureGap: ctx.game.pressureGap || 10,
-      ladder: ctx.game.id === "ladder" ? { need: ctx.players.map(G.ladderLength) } : null,
-      gameOverAfter: isOver(),
-      hit: hit,
-      nearMissYd: G.nearMiss(shot),
-      chance: (Math.imul(shot.id || 1, 2654435761) >>> 0) / 4294967296
-    };
-  }
-
   // Timers tied to the shot on screen; cleared when the next shot (or undo) arrives.
   function later(ms, fn) { bcTimers.push(setTimeout(fn, ms)); }
 
@@ -411,28 +350,29 @@
     box.classList.add("show");
   }
 
+  // The captions and their timings come from the server's shot plan.
   function runBroadcast(rec, plan) {
-    var p = ctx.players[rec.idx], d = plan.drama, shot = rec.shot, f = shot.flight;
-    renderBug(totalsFrom(ctx.history.slice(0, -1)), rec.idx);
+    var p = ctx.players[rec.idx], d = plan.drama, r = rec.result;
+    renderBug(rec.scores.before, rec.idx);
     $("bc").classList.add("on");
-    later(800, function () {
-      lowerThird(d.preTag || "ON THE TEE", p, d.preText ||
-        shot.speed_mph.toFixed(1) + " mph · " + shot.vla_deg.toFixed(1) + "° launch · " + Math.round(shot.spin_rpm) + " rpm");
+    plan.captions.forEach(function (c) {
+      if (c.kind === "lower") later(c.at_ms, function () { lowerThird(c.tag, p, c.text); });
+      else if (c.kind === "data") {
+        later(c.at_ms, function () {
+          var box = $("bc-data");
+          box.innerHTML = "";
+          c.items.forEach(function (it) {
+            var cell = el("div");
+            cell.appendChild(el("small", "", it[0]));
+            cell.appendChild(el("b", "", it[1]));
+            box.appendChild(cell);
+          });
+          box.classList.add("show");
+        });
+      }
     });
     later(plan.restMs, function () {
-      var r = rec.result;
-      lowerThird(d.headline || (r.great ? "ON TARGET" : "RESULT"), p, r.what + (r.detail ? " · " + r.detail : ""));
-      var box = $("bc-data");
-      box.innerHTML = "";
-      [["BALL SPEED", shot.speed_mph.toFixed(1)], ["CARRY", f.carry_yd.toFixed(1)], ["TOTAL", (f.total_yd || f.carry_yd).toFixed(1)], ["APEX FT", Math.round(f.apex_ft)]]
-        .forEach(function (it) {
-          var cell = el("div");
-          cell.appendChild(el("small", "", it[0]));
-          cell.appendChild(el("b", "", String(it[1])));
-          box.appendChild(cell);
-        });
-      box.classList.add("show");
-      renderBug(totalsFrom(ctx.history), rec.idx);
+      renderBug(rec.scores.after, rec.idx);
       sound(r.great ? "crowd" : d.headline === "SO CLOSE!" ? "ooh" : "blip");
       if (r.great) sound("great");
     });
@@ -457,37 +397,18 @@
   function hideBanner() { $("result-banner").classList.remove("show"); }
 
   function showWinner() {
-    if (!ctx || !isOver()) return;
-    var text;
-    if (ctx.game.winnerText) {
-      text = ctx.game.winnerText(ctx);
-      renderBoard($("final-board"), ctx.game.scoreboard(ctx, -1), false);
-    } else {
-      var s = standings();
-      var best = s.filter(function (x) { return x.total === s[0].total; });
-      text = best.length > 1
-        ? best.map(function (x) { return x.name; }).join(" & ") + " tie!"
-        : s[0].name + " wins!";
-      renderBoard($("final-board"), s.map(function (x) {
-        return { name: x.name, color: x.color, value: ctx.game.formatScore(x.total) };
-      }), true);
-    }
-    $("winner-text").textContent = text;
+    if (!ctx || !isOver() || !ctx.state.winner) return;
+    var w = ctx.state.winner;
+    renderBoard($("final-board"), w.board, w.numbered);
+    $("winner-text").textContent = w.text;
     $("winner").classList.add("show");
     sound("win");
   }
   function hideOverlay() { $("winner").classList.remove("show"); }
 
+  // The server picks a sensible club for whoever is up.
   function testShot() {
-    var body = {};
-    if (ctx && !isOver() && ctx.game.testKind) {
-      var idx = playerIdxForTurn(ctx.turn);
-      body.kind = ctx.game.testKind(targetFor(idx, ctx.turn), ctx, idx);
-    }
-    fetch("/api/test-shot", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }).catch(function () { setStatus(null); });
+    api("/api/test-shot").catch(function () { setStatus(null); });
   }
 
   /* ---------------- drawing ---------------- */
@@ -520,8 +441,8 @@
       canvas3d = fresh;
     }
     try {
-      var G = window.GarageGames;
-      gl = window.GarageRangeGL.create(canvas3d, { targets: G.TARGETS, inner: G.INNER, center: G.CENTER, quality: settings.quality });
+      gl = window.GarageRangeGL.create(canvas3d, { targets: catalog.targets, inner: catalog.inner, center: catalog.center,
+        idleCamera: catalog.idle_camera, quality: settings.quality });
       glQuality = settings.quality;
     } catch (e) {
       console.warn("3D graphics unavailable, using 2D view:", e);
@@ -531,11 +452,16 @@
     return gl;
   }
 
-  function drawRangeGL(r, target, idx, showing, now) {
+  // Earlier shots stay on the range as markers (not the one being shown).
+  function recentShots(showing) {
+    return ctx.history.filter(function (h) { return h.shot && (!showing || h.turn !== showing.rec.turn); })
+      .slice(-2 * playerCount());
+  }
+
+  function drawRangeGL(r, highlight, showing, now) {
     var stage = $("field3d").parentElement;
     r.resize(stage.clientWidth, stage.clientHeight);
-    var recent = ctx.history.filter(function (h) { return h.shot && (!showing || h !== showing.rec); })
-      .slice(-2 * playerCount());
+    var recent = recentShots(showing);
     var plan = showing && showing.plan;
     if (plan && debugWall !== null) showing.start = now - debugWall * 1000;
     r.render({
@@ -545,7 +471,7 @@
       shot: plan ? showing.rec.shot : null,
       shotId: plan ? showing.rec.shot.id : null,
       color: showing ? ctx.players[showing.rec.idx].color : "#ffffff",
-      highlight: ctx.game.highlight(target, ctx, idx),
+      highlight: highlight,
       markers: recent.map(function (h) {
         return { p: h.result.stop || h.shot.flight.rest, color: ctx.players[h.idx].color };
       })
@@ -556,22 +482,21 @@
     requestAnimationFrame(frame);
     if (!ctx || !$("game").classList.contains("active")) return;
     var showing = replay && now < replay.until ? replay : null;
-    var idx = showing ? showing.rec.idx : playerIdxForTurn(ctx.turn);
-    var target = showing ? showing.rec.target : targetFor(idx, ctx.turn);
-    var r = ctx.game.view === "range3d" ? glRenderer() : null;
+    var target = showing ? showing.rec.target : ctx.state.current.target;
+    var highlight = showing ? showing.rec.highlight : ctx.state.current.highlight;
+    var r = ctx.info.view === "range3d" ? glRenderer() : null;
     canvas.style.display = r ? "none" : "block";
     $("field3d").style.display = r ? "block" : "none";
-    if (r && (!showing || showing.plan)) return drawRangeGL(r, target, idx, showing, now);
+    if (r && (!showing || showing.plan)) return drawRangeGL(r, highlight, showing, now);
     var size = fit();
-    if (ctx.game.view === "speed") drawSpeed(size, target, showing, now);
-    else if (ctx.game.view === "range3d") drawRange3D(size, target, idx, showing, now);
+    if (ctx.info.view === "speed") drawSpeed(size, target, showing, now);
+    else if (ctx.info.view === "range3d") drawRange3D(size, highlight, showing, now);
     else drawRange(size, target, showing, now);
   }
 
-  function drawRange3D(size, target, idx, showing, now) {
+  function drawRange3D(size, highlight, showing, now) {
     var G = window.GarageGames;
-    var recent = ctx.history.filter(function (r) { return r.shot && (!showing || r !== showing.rec); })
-      .slice(-2 * playerCount());
+    var recent = recentShots(showing);
     var shot = null, timing = null;
     if (showing) {
       var rec = showing.rec;
@@ -582,8 +507,8 @@
       timing = G.rangeTiming(rec.shot, rec.result.stop);
     }
     window.GarageRange3D.render(g2, size.w, size.h, {
-      targets: G.TARGETS, inner: G.INNER, center: G.CENTER, now: now,
-      highlight: ctx.game.highlight(target, ctx, idx),
+      targets: catalog.targets, inner: catalog.inner, center: catalog.center, now: now,
+      highlight: highlight,
       markers: recent.map(function (r) {
         return { p: r.result.stop || r.shot.flight.rest, color: ctx.players[r.idx].color };
       }),
@@ -597,7 +522,7 @@
     var W = size.w, H = size.h, g = g2;
     var game = ctx.game;
     var others = ctx.history.filter(function (r) {
-      return r.shot && sameTarget(r.target, target) && (!showing || r !== showing.rec);
+      return r.shot && sameTarget(r.target, target) && (!showing || r.turn !== showing.rec.turn);
     });
     var far = game.extent ? game.extent(target) * 1.25 : 0;
     others.concat(showing ? [showing.rec] : []).forEach(function (r) {
@@ -788,6 +713,7 @@
   function connectEvents() {
     var es = new EventSource("/events");
     es.addEventListener("status", function (e) { setStatus(JSON.parse(e.data)); });
+    es.addEventListener("state", function (e) { onState(JSON.parse(e.data)); });
     es.addEventListener("shot", function (e) { onShot(JSON.parse(e.data)); });
     es.onerror = function () { setStatus(null); };
   }
@@ -798,23 +724,18 @@
     document.body.classList.toggle("playing", id === "game");
   }
 
+  // Ends the game for every screen; the server's "end" state brings them all back here.
   function toMenu() {
     if (ctx && ctx.history.length && !isOver() && !confirm("Quit this game?")) return;
-    ctx = null;
-    replay = null;
-    clearBroadcast();
-    hideOverlay();
-    hideBanner();
-    showScreen("setup");
-    renderPlayers();
+    api("/api/game/end").catch(function () { setStatus(null); });
   }
 
   $("btn-test").onclick = testShot;
   $("btn-undo").onclick = undo;
   $("btn-skip").onclick = skipTurn;
   $("btn-menu").onclick = toMenu;
-  $("btn-menu2").onclick = function () { ctx = null; toMenu(); };
-  $("btn-again").onclick = function () { startGame(ctx.game); };
+  $("btn-menu2").onclick = toMenu;
+  $("btn-again").onclick = function () { startGame(ctx && ctx.info); };
   $("btn-sound").onclick = function () {
     soundOn = !soundOn;
     this.textContent = soundOn ? "🔊" : "🔇";
@@ -830,10 +751,15 @@
   });
 
   renderPlayers();
-  renderGameCards();
-  renderRounds();
   renderOptions();
-  connectEvents();
+  // The game list comes from the server, then the live events start.
+  fetch("/api/games").then(function (r) { return r.json(); }).then(function (data) {
+    catalog = data;
+    selectedGame = catalog.games[0];
+    renderGameCards();
+    renderRounds();
+    connectEvents();
+  }).catch(function () { setStatus(null); });
   // read-only peek for automated tests
   var debugWall = null;
   window.GarageDebug = {

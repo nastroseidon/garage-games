@@ -33,8 +33,10 @@ to 225 yards, a live ball tracer, roll-out after landing, and a mini-map.
 | 📣 **Called Shot** | Every ball gets a called target. Hit it for double points; any other target scores zero. Juniors are only called to the three nearest targets. |
 | 🪜 **Ladder Climb** | Hit the targets in order, nearest first. The first player to reach the top wins. Adults climb 5 rungs (to Purple), juniors 3 (to Green). |
 
-The target layout is in `TARGETS` at the top of the Target Range section in
-`web/games.js`. Change the distances, sizes or points to fit your game.
+The target layout is in `TARGETS` in the Target Range section of `games.py`.
+Change the distances, sizes or points to fit your game. (For now, also make
+the same change in `web/games.js`; `tests/test_parity.py` fails until the two
+match.)
 
 ### Broadcast camera
 
@@ -153,10 +155,17 @@ Keep in mind:
 ## How it works
 
 ```
-VTrack software ──Open Connect (TCP 921)──▶ server.py ──live events──▶ browser game screen
-                                              │
-                                              └─ flight.py turns speed/launch/spin into carry & landing spot
+VTrack software ──Open Connect (TCP 921)──▶ server.py ──live events──▶ every game screen
+                                              │                         (projector, tablet, ...)
+                                              ├─ flight.py   speed/launch/spin → carry & landing spot
+                                              ├─ session.py  the running game: turns, undo, skip, winner
+                                              ├─ games.py    game rules and scoring
+                                              └─ director.py broadcast decisions + the shot plan
 ```
+
+The server is the brain. The game screens only draw what it sends, so
+every screen shows the same game, and a future Unreal renderer can play
+the same shot plans as the browser.
 
 - `openconnect.py` acts as the receiving side of the GSPro Open Connect API v1.
   It answers each shot with `{"Code": 200}` like a simulator would.
@@ -164,23 +173,57 @@ VTrack software ──Open Connect (TCP 921)──▶ server.py ──live event
   5% of PGA Tour average carries. It adds a roll-out after landing (about
   20 yds for a driver, 2 for a wedge). It's good for party games but is
   not a substitute for a real simulator.
-- `web/range-gl.js` draws the 3D range with Three.js (WebGL). The library
-  is included in `web/vendor/three/` (MIT license), so no internet is needed.
-- `web/director.js` decides which shots get broadcast coverage and plans
-  each shot's camera cuts, slow motion and ball path.
+- `games.py` holds the game rules. Each game is one small class, so a new
+  game means copying one and changing the rules.
+- `director.py` decides which shots get broadcast coverage and plans each
+  shot's camera cuts, slow motion, ball path and captions. It sends the plan
+  as a **shot plan**: the ball and camera sampled 60 times a second (with
+  the camera smoothing already done), the cuts, and timed captions. Units
+  are yards: x downrange, y to the right, z up.
+- `session.py` runs the current game: whose turn it is, the scores, undo,
+  skip and the winner.
+- `web/app.js` is the setup screen and scoreboard. `web/shotplan.js` plays
+  back a shot plan, and `web/range-gl.js` draws the 3D range with Three.js
+  (WebGL). The library is included in `web/vendor/three/` (MIT license), so
+  no internet is needed.
 - `web/range3d.js` is the Classic 2D drawing, also used automatically when
   3D graphics aren't available.
-- `web/games.js` holds the game rules. Each game is one small object, so a
-  new game means copying one and changing the rules.
+- `web/games.js` and `web/director.js` are the original JavaScript versions
+  of the rules and the director. The page still uses `web/games.js` for the
+  Classic 2D drawings. Both are kept for now so `tests/test_parity.py` can
+  check the Python versions give exactly the same results.
+
+### Control API
+
+Any screen can run the game (for example a tablet as the control panel).
+All requests are JSON `POST`s to `http://localhost:8080` unless marked GET:
+
+| Request | Does |
+| --- | --- |
+| `GET /api/games` | The games, the target layout and the idle camera |
+| `GET /api/state` | The current game: players, scoreboard, whose turn |
+| `/api/game/start` | `{"game": "targetrange", "players": [{"name": "Dad", "junior": false, "color": "#ffd23f"}], "rounds": 10, "camera": "auto"}` |
+| `/api/game/undo`, `/api/game/skip`, `/api/game/end` | Undo the last shot, skip a turn, end the game |
+| `/api/settings` | `{"camera": "auto" \| "broadcast" \| "quick" \| "static"}` |
+| `/api/test-shot` | Fake a shot that suits whoever is up |
+
+`GET /events` streams `status` (launch monitor), `state` (after any change)
+and `shot` (the scored shot, the new state and, for the Target Range games,
+the shot plan) as Server-Sent Events.
 
 ## Testing
 
 ```
-python -m unittest discover -s tests      # Open Connect parsing + flight model
-node tests/test_games.js                  # game scoring (needs Node.js)
-node tests/test_director.js               # broadcast triggers + camera plans
+python -m unittest discover -s tests      # everything in Python: Open Connect, flight model,
+                                          # game rules, director, shot plans, game session, API
+node tests/test_games.js                  # the original JavaScript game rules (needs Node.js)
+node tests/test_director.js               # the original JavaScript director
 python tools/fake_launch_monitor.py -n 5  # send 5 fake shots over Open Connect
 ```
+
+`tests/test_parity.py` runs the JavaScript and Python versions side by side
+on hundreds of shots and checks they agree. It needs Node.js and is skipped
+without it.
 
 ## Safety
 
