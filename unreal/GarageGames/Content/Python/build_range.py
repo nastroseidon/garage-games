@@ -3,7 +3,7 @@
 The layout (all seven targets from the repo's games.py, mown stripes,
 yardage boards, light towers, a tree line and hills) comes from
 range_layout.py. If free Fab / Quixel trees, rocks or grass are on this PC
-(Content/Fab or Content/Megascans), they replace the simple shapes; see
+(any Content folder that isn't ours), they replace the simple shapes; see
 unreal/README.md. Lighting starts as night; switch with
 garage_env.set_time_of_day("day").
 
@@ -40,6 +40,9 @@ MAP = "/Game/Maps/Range"
 ART = garage_env.ART
 YD = gs.YARD_CM
 START_LIGHTING = "night"
+# Set GG_NO_FAB=1 in the editor (os.environ) to build with the simple shapes only,
+# e.g. before committing Range.umap, so a fresh clone without the Fab packs opens cleanly.
+USE_FAB = os.environ.get("GG_NO_FAB") != "1"
 
 assets = unreal.AssetToolsHelpers.get_asset_tools()
 mel = unreal.MaterialEditingLibrary
@@ -104,6 +107,35 @@ def all_materials():
     return mats
 
 
+# Fab grass goes on these grounds, tinted so the mown stripes still show.
+GRASS_TINT = {"grass_a": 1.0, "grass_b": 0.8, "rough": 0.55, "tee_turf": 1.15}
+GRASS_TILE_YD = 2.0  # one repeat of the grass texture, in yards
+# glTF materials (what Fab's .glb imports become) tile each texture with <name>_OffsetScale
+GRASS_TEXTURES = ("BaseColorTexture", "MetallicRoughnessTexture", "NormalTexture", "OcclusionTexture")
+
+
+def grass_material(grass, key, size_yd):
+    """A tiled, tinted copy of the Fab grass for one ground piece (kept in LOCAL, never committed)."""
+    name = "MI_%s_%dx%d" % (key, size_yd[0], size_yd[1])
+    path = "%s/%s" % (garage_env.LOCAL, name)
+    if eal.does_asset_exist(path):
+        return unreal.load_asset(path)
+    mi = assets.create_asset(name, garage_env.LOCAL, unreal.MaterialInstanceConstant,
+                             unreal.MaterialInstanceConstantFactoryNew())
+    mel.set_material_instance_parent(mi, grass)
+    vectors = set(str(n) for n in mel.get_vector_parameter_names(mi))
+    reps = [max(1.0, s / GRASS_TILE_YD) for s in size_yd[:2]]
+    for tex in GRASS_TEXTURES:
+        if tex + "_OffsetScale" in vectors:
+            mel.set_material_instance_vector_parameter_value(
+                mi, tex + "_OffsetScale", unreal.LinearColor(0, 0, reps[0], reps[1]))
+    if "BaseColorFactor" in vectors:
+        t = GRASS_TINT[key]
+        mel.set_material_instance_vector_parameter_value(mi, "BaseColorFactor", unreal.LinearColor(t, t, t, 1))
+    eal.save_loaded_asset(mi)
+    return mi
+
+
 def mesh_height_cm(mesh):
     return max(1.0, mesh.get_bounds().box_extent.z * 2)
 
@@ -128,8 +160,8 @@ def spawn_mesh(p, mats, dressing, counters):
         smc = a.static_mesh_component
         smc.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/" + p["mesh"]))
         mat = mats[p["material"]]
-        if dressing.get("grass") and p["material"] in ("rough",):
-            mat = dressing["grass"]
+        if dressing.get("grass") and p["material"] in GRASS_TINT:
+            mat = grass_material(dressing["grass"], p["material"], p["size"])
         smc.set_material(0, mat)
         size = [max(v, 0.001) * YD / 100.0 for v in p["size"]]
         if p["mesh"] == "Plane":
@@ -195,7 +227,9 @@ def build():
 
     # ---- the range, from range_layout.py ----
     mats = all_materials()
-    dressing = garage_env.dressing()
+    if eal.does_directory_exist(garage_env.LOCAL):
+        eal.delete_directory(garage_env.LOCAL)  # tiled grass from the last build
+    dressing = garage_env.dressing() if USE_FAB else {"tree": [], "rock": [], "grass": None}
     counters = {}
     for p in R.layout(games.TARGETS, games.INNER, games.CENTER):
         if p["kind"] == "mesh":

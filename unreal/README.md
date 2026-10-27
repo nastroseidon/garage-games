@@ -72,20 +72,42 @@ who clones the repo repeats these steps (or keeps the simple shapes).
    surface such as *"grass"* or *"lawn"*. Check each item says it can be
    used in Unreal Engine. Some Megascans are paid now; anything already in
    your Fab library stays usable.
+   Megascans' free tier is *"UEFN – Reference only"*, which is for Fortnite
+   projects, not this one, so a Megascans item needs a paid licence.
 4. Click **Add to Project** (or *Download*, then *Add to Project*). Pick a
-   **Medium** quality to keep it fast. Fab imports into `Content/Fab/`. If
-   it asks for a folder, choose `Content/Fab` (or `Content/Megascans`). The
-   build only looks in those two folders.
+   **Medium** quality to keep it fast. Fab imports into `Content/Fab/` or a
+   folder named after the pack (e.g. `Content/PSG_LTX/`). Either is fine:
+   only our own folders (`Garage`, `Maps`, `Python`) are committed, and the
+   build looks in every other folder.
 5. Rebuild the range: *Tools → Execute Python Script...* → choose
    `Content/Python/build_range.py`. The Output Log shows what it found, e.g.
    `dressing: 3 tree meshes, 2 rock meshes, grass material: MI_Grass_Lawn`.
-   Trees replace the cones, rocks replace the round stones, and the grass
-   material goes on the rough around the range.
+   Trees replace the cones and rocks replace the round stones. The grass
+   material goes on the mown stripes, the tee and the rough, tiled every
+   2 yards and tinted per area (the tiled copies go in `Content/GarageLocal/`,
+   also never committed).
 
 Asset names decide where they go: names containing *tree, pine, oak, fir,
-spruce, birch, maple, conifer, bush, shrub, hedge* become trees; *rock,
-boulder, stone, cliff* become rocks; a material with *grass, lawn, turf,
-meadow* becomes the rough.
+spruce, birch, maple, conifer, bush, shrub, hedge* or a tree genus (*abies,
+picea, pinus, larix, quercus, betula*) become trees; *rock, boulder, stone,
+cliff* become rocks; a material with *grass, lawn, turf, meadow* becomes the
+grass.
+
+Before committing `Content/Maps/Range.umap`, build it without Fab content so
+a fresh clone opens cleanly. Run this in the editor's Python console (or
+`tools/unreal_exec.py -c`) and then build:
+
+```python
+import os; os.environ["GG_NO_FAB"] = "1"
+```
+
+Set it back to `"0"` and build again to get the Fab look back.
+
+What this PC uses (for credit; none of it is in the repo):
+
+- *PSG – Realistic Abies lasiocarpa* by Studio LTX (Fab Standard License).
+- *025_Grass* by NoblesseOblige-No.1, licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## Check it runs smoothly (with the VTrack software running)
 

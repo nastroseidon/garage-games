@@ -11,8 +11,12 @@ import unreal
 import range_layout as R
 
 ART = "/Game/Garage"
-DRESSING_FOLDERS = ["/Game/Fab", "/Game/Megascans"]  # where Fab and Quixel Bridge import (never committed)
-TREE_WORDS = ("tree", "pine", "oak", "fir", "spruce", "birch", "maple", "conifer")
+# Our own folders. Anything else under Content/ came from Fab / Quixel (and is never committed).
+OWN_FOLDERS = ("/Game/Garage", "/Game/Maps", "/Game/Python")
+# What build_range.py makes from Fab assets (tiled grass). Not committed, and not a Fab pack.
+LOCAL = "/Game/GarageLocal"
+TREE_WORDS = ("tree", "pine", "oak", "fir", "spruce", "birch", "maple", "conifer",
+              "abies", "picea", "pinus", "larix", "quercus", "betula")
 BUSH_WORDS = ("bush", "shrub", "hedge")
 ROCK_WORDS = ("rock", "boulder", "stone", "cliff")
 GRASS_WORDS = ("grass", "lawn", "turf", "meadow")
@@ -83,22 +87,25 @@ def set_time_of_day(name="night", save=True):
 def dressing():
     """Fab / Quixel assets on this PC that the range can use (empty if none were downloaded).
 
+    Looks in every Content/ folder except our own, since Fab names the folder after the pack.
+
     {"tree": [StaticMesh...], "rock": [...], "grass": MaterialInterface or None}
     """
     ar = unreal.AssetRegistryHelpers.get_asset_registry()
     found = {"tree": [], "rock": [], "grass": None}
-    for folder in DRESSING_FOLDERS:
-        for data in ar.get_assets_by_path(folder, recursive=True):
-            name = str(data.asset_name).lower()
-            cls = str(data.asset_class_path.asset_name)
-            if cls == "StaticMesh":
-                if any(w in name for w in TREE_WORDS + BUSH_WORDS):
-                    found["tree"].append(data.get_asset())
-                elif any(w in name for w in ROCK_WORDS):
-                    found["rock"].append(data.get_asset())
-            elif cls in ("MaterialInstanceConstant", "Material") and found["grass"] is None:
-                if any(w in name for w in GRASS_WORDS):
-                    found["grass"] = data.get_asset()
+    for data in sorted(ar.get_assets_by_path("/Game", recursive=True), key=lambda d: str(d.package_name)):
+        if str(data.package_name).startswith(OWN_FOLDERS + (LOCAL,)):
+            continue
+        name = str(data.asset_name).lower()
+        cls = str(data.asset_class_path.asset_name)
+        if cls == "StaticMesh":
+            if any(w in name for w in TREE_WORDS + BUSH_WORDS):
+                found["tree"].append(data.get_asset())
+            elif any(w in name for w in ROCK_WORDS):
+                found["rock"].append(data.get_asset())
+        elif cls in ("MaterialInstanceConstant", "Material") and found["grass"] is None:
+            if any(w in name for w in GRASS_WORDS):
+                found["grass"] = data.get_asset()
     unreal.log("[Garage Games] dressing: %d tree meshes, %d rock meshes, grass material: %s" % (
         len(found["tree"]), len(found["rock"]), found["grass"].get_name() if found["grass"] else "none"))
     return found

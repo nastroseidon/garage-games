@@ -133,22 +133,25 @@ def towers():
 
 
 def trees(seed=7):
-    """A loose tree line both sides of the range (placeholders: a trunk and a cone)."""
+    """A tree line two rows deep down both sides of the range (placeholders: a trunk and a cone)."""
     rng = random.Random(seed)
     pieces = []
     n = 0
+    mid = sum(TREE_LINE_Y) / 2
+    rows = ((TREE_LINE_Y[0], mid), (mid, TREE_LINE_Y[1]))
     for side in (-1, 1):
-        x = -20.0
-        while x < RANGE_LENGTH + 40:
-            x += rng.uniform(9, 18)
-            y = side * rng.uniform(*TREE_LINE_Y)
-            h = rng.uniform(9, 16)
-            yaw = rng.uniform(0, 360)
-            pieces.append(_mesh("GG_Tree_%03d" % n, "Cone", "leaves", (x, y, h * 0.3 + h * 0.75 / 2),
-                                (h * 0.45, h * 0.45, h * 0.75), yaw=yaw, role="tree"))
-            pieces.append(_mesh("GG_Tree_%03d_Trunk" % n, "Cylinder", "trunk", (x, y, h * 0.3 / 2),
-                                (h * 0.06, h * 0.06, h * 0.3), yaw=yaw, role="trunk"))
-            n += 1
+        for near, far in rows:
+            x = -20.0 + rng.uniform(0, 6)
+            while x < RANGE_LENGTH + 40:
+                x += rng.uniform(5, 10)
+                y = side * rng.uniform(near, far)
+                h = rng.uniform(9, 16)
+                yaw = rng.uniform(0, 360)
+                pieces.append(_mesh("GG_Tree_%03d" % n, "Cone", "leaves", (x, y, h * 0.3 + h * 0.75 / 2),
+                                    (h * 0.45, h * 0.45, h * 0.75), yaw=yaw, role="tree"))
+                pieces.append(_mesh("GG_Tree_%03d_Trunk" % n, "Cylinder", "trunk", (x, y, h * 0.3 / 2),
+                                    (h * 0.06, h * 0.06, h * 0.3), yaw=yaw, role="trunk"))
+                n += 1
     # a few rocks between the trees and the range
     for i in range(10):
         side = 1 if i % 2 else -1
