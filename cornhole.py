@@ -47,7 +47,11 @@ SCREEN_W_FT = 12.0
 SCREEN_H_FT = 9.0
 HITTER_FT = 10.0            # golfer to screen (9-11 ft)
 TEE_FOV = math.degrees(2 * math.atan(SCREEN_H_FT / 2 / HITTER_FT))   # vertical, ~48.5 degrees
-TEE_EYE_YD = SCREEN_H_FT / 2 / 3                                     # the screen's middle
+# A real thrower's eyes are 6 ft up at the foul line, 27 ft from the far board's front edge.
+# The tee camera looks down at the hole at that same angle, so the scaled-up board reads like
+# a real one seen from the line instead of from ground level.
+THROWER_EYE = 6 * FT
+THROW_LINE = 27 * FT
 
 # ---- contact (on the real-size board) ----
 MU_BOARD = 0.4              # sliding friction, bag on board
@@ -374,12 +378,19 @@ def cameras(board):
     i = board.info()
     hx, hz, ln = i["hole"][0], i["hole"][2], max(i["length"], 1.0)
     return {
-        "tee": {"pos": [0, 0, TEE_EYE_YD], "look": [hx, 0, TEE_EYE_YD], "fov": round(TEE_FOV, 2)},
+        "tee": {"pos": [0, 0, round(hz + hx * tee_drop(), 3)], "look": [hx, 0, hz], "fov": round(TEE_FOV, 2)},
         # in close over the front-left corner, on the top half of the board where the bags land and bump
         "board": {"pos": [hx - 0.9 * ln, -0.55 * ln, hz + 0.75 * ln], "look": [hx - 0.08 * ln, 0, hz], "fov": 36},
         # high over the front of the board: the whole top and the grass behind it, where knocked bags fall
         "top": {"pos": [hx - 0.55 * ln, 0, hz + 1.5 * ln], "look": [hx + 0.05 * ln, 0, 0], "fov": 48},
     }
+
+
+def tee_drop():
+    """How steeply a 6 ft thrower at the foul line looks down at the hole (rise over run)."""
+    hole_h = FRONT_H + (BOARD_L - HOLE_FROM_BACK) * math.sin(SLOPE)
+    run = THROW_LINE + (BOARD_L - HOLE_FROM_BACK) * math.cos(SLOPE)
+    return (THROWER_EYE - hole_h) / run
 
 
 def idle_camera(board):

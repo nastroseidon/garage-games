@@ -53,6 +53,14 @@ class BoardTests(unittest.TestCase):
         cam = C.idle_camera(C.Board(100))
         self.assertAlmostEqual(cam["fov"], 48.46, places=1)   # 9 ft tall screen seen from 10 ft
 
+    def test_tee_camera_looks_down_like_a_six_foot_thrower(self):
+        for d in (30, 100, 250):
+            b = C.Board(d)
+            cam, hole = C.idle_camera(b), b.info()["hole"]
+            self.assertEqual(cam["look"], hole)
+            drop = C.math.degrees(C.math.atan2(cam["pos"][2] - hole[2], hole[0] - cam["pos"][0]))
+            self.assertAlmostEqual(drop, 9.66, places=1)      # 6 ft eyes, hole ~30 ft away
+
 
 class LandingTests(unittest.TestCase):
     def test_landing_within_the_hole_radius_is_in(self):
