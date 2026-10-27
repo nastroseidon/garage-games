@@ -3,3 +3,44 @@ logs/
 # Python
 __pycache__/
 *.pyc
+
+# ================= Unreal Engine =================
+# Rebuilt by the editor (at any depth, so plugins are covered too)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+# Packaged builds
+Build/
+Packaged/
+ArchivedBuilds/
+
+# Generated IDE files (Unreal recreates them)
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.code-workspace
+
+# Never commit Unreal Engine itself (source or an installed copy).
+UnrealEngine/
+UE_*/
+Engine/Binaries/
+Engine/Source/
+
+# Never commit paid Fab / Marketplace / Quixel content: their licenses don't
+# allow sharing it in a public repo. Fab and Quixel Bridge import into these
+# folders by default; put any other third-party content in Content/ThirdParty/.
+unreal/**/Content/Fab/
+unreal/**/Content/Megascans/
+unreal/**/Content/MSPresets/
+unreal/**/Content/ThirdParty/
+unreal/**/Plugins/Marketplace/
+unreal/**/Plugins/Fab/
+# Epic's sample content is licensed for Unreal users only, not for public repos
+unreal/**/Content/StarterContent/
