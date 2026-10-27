@@ -115,7 +115,9 @@ standing on the range.
 - **Life-size view.** The golfer's camera matches a 12 × 9 ft screen seen from
   10 ft, so the board looks as big as a real board at the same distance. The
   numbers are at the top of `cornhole.py` (`SCREEN_W_FT`, `SCREEN_H_FT`,
-  `HITTER_FT`) if your screen differs.
+  `HITTER_FT`) if your screen differs. The camera looks down at the board at
+  the same angle a 6 ft thrower at the foul line would (about 10 degrees), so
+  you see the top of the board before each throw (`THROWER_EYE`).
 - **Skip** counts as a thrown bag that scored nothing. **Undo** puts the board
   back exactly as it was.
 
