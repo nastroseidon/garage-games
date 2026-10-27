@@ -118,6 +118,12 @@ standing on the range.
   `HITTER_FT`) if your screen differs. The camera looks down at the board at
   the same angle a 6 ft thrower at the foul line would (about 10 degrees), so
   you see the top of the board before each throw (`THROWER_EYE`).
+- **Flight.** A stinger's bag flies low and comes in flat; a high shot's bag
+  climbs and drops in steeply, at close to the ball's own landing angle. Side
+  spin (a draw or fade) makes the bag spin flat, clockwise for a fade, faster
+  the more side spin (`BAG_SPIN_PER_RPM`); backspin and topspin don't show,
+  so the bag never tumbles. Test shots now include stingers, high shots and big
+  curves.
 - **Scores.** The sidebar floats over the right of the view (in every game),
   so the board stays centred on the screen. The game score, side against side,
   sits at the top of the sidebar in each side's color. Each player's row shows what they have on the

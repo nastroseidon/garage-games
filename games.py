@@ -766,19 +766,30 @@ class Cornhole(Game):
         """A shot aimed at the hole, with a golfer's usual misses."""
         d = ctx.cornhole["board"].distance_yd
         vla, spin = {"chip": (28, 4500), "wedge": (28, 8500), "iron": (18, 6500), "driver": (12, 3000)}[kind_for(d)]
+        rng = self.rng
+        # some stingers (low and hot) and some high, floaty shots, so the bags' flights vary
+        style = rng.random()
+        if style < 0.2:
+            vla, spin = vla * 0.45, spin * 0.55
+        elif style < 0.4:
+            vla, spin = vla * 1.5, spin * 1.1
+        vla += rng.uniform(-2, 2)
+        spin *= rng.uniform(0.9, 1.1)
+        # one in four is a big draw or fade, started out the other way so it curves back
+        axis = rng.choice((-1, 1)) * rng.uniform(12, 20) if rng.random() < 0.25 else rng.uniform(-6, 6)
         lo, hi = 5.0, 200.0
         for _ in range(30):
             mid = (lo + hi) / 2
-            if flight.simulate(mid, vla, 0, spin, 0)["carry_yd"] < d:
+            if flight.simulate(mid, vla, 0, spin, axis)["carry_yd"] < d:
                 lo = mid
             else:
                 hi = mid
-        rng = self.rng
+        curve = flight.simulate(lo, vla, 0, spin, axis)["offline_yd"]
+        aim = -math.degrees(math.atan2(curve, d))
         # about one swing in five is pushed or pulled far enough to miss the board to the side
-        hla = rng.choice((-1, 1)) * rng.uniform(8, 12) if rng.random() < 0.2 else rng.uniform(-3, 3)
-        return {"speed_mph": lo * rng.uniform(0.95, 1.04), "vla_deg": vla + rng.uniform(-2, 2),
-                "hla_deg": hla, "spin_rpm": spin * rng.uniform(0.9, 1.1),
-                "spin_axis_deg": rng.uniform(-6, 6)}
+        hla = rng.choice((-1, 1)) * rng.uniform(8, 12) if rng.random() < 0.2 else aim + rng.uniform(-3, 3)
+        return {"speed_mph": lo * rng.uniform(0.95, 1.04), "vla_deg": vla, "hla_deg": hla,
+                "spin_rpm": spin, "spin_axis_deg": axis}
 
     # ---- a throw ----
     def score(self, shot, t, p, ctx, idx):
