@@ -21,6 +21,7 @@ hole, in yards (x downrange, y right, z up).
 The rules (innings, cancellation scoring) live in games.py (Cornhole).
 """
 
+import functools
 import math
 
 IN = 0.0254
@@ -122,7 +123,7 @@ class Board:
                 "front": self.to_range([self.x0, 0, FRONT_H]),
                 "back": self.to_range([self.x1, 0, BACK_H]),
                 "frame": round(FRAME_H * k, 4), "bag": round(BAG * k, 4), "bag_t": round(BAG_T * k, 4),
-                "sign": yardage_sign(self)}
+                "sign": yardage_sign(self), "camp": _camp_at(self.distance_yd)}
 
 
 # ---- the yardage sign: a crooked, hand-painted plank on a post, off to the left ----
@@ -195,6 +196,149 @@ def yardage_sign(board):
     return {"text": text, "base": base, "u": [round(c, 5) for c in u], "v": [round(c, 5) for c in v],
             "n": [round(c, 5) for c in nvec], "w": round(w, 4), "h": round(h, 4), "t": round(0.02 * ln, 4),
             "post_h": round(post_h, 4), "post_w": round(0.035 * ln, 4), "strokes": strokes}
+
+
+# ---- the campsite around the board ----
+# Laid out at real size in board space (metres, hole at x = 0, x away from the thrower, y right),
+# then scaled up with the board, so the grass, the fire and the trees all match the board.
+# It is the same camp at every hole distance. The thrower stands about 2.5 m short of the hole.
+CAMP_CENTER = (4.0, 0.0)        # the middle of the clearing
+CAMP_CLEARING_R = 9.0
+CAMP_FIRE = (3.6, 2.2)
+CAMP_LANE = (-3.6, 1.6, 1.5)    # x from, x to, half width: where the bags fly; nothing stands in it
+
+
+@functools.lru_cache(maxsize=8)
+def _camp_at(distance_yd):
+    """The campsite for a hole distance, built once (the screens ask for the board often)."""
+    return campsite(Board(distance_yd))
+
+
+def campsite(board):
+    """The campsite in yards on the range, sizes in yards. "k" is yards per real metre."""
+    import random
+    rnd = random.Random(7)
+    k = board.s / YD
+
+    def at(x, y, z=0.0):
+        return [round(c, 3) for c in board.to_range([x, y, z])]
+
+    def m(v):
+        return round(v * k, 4)
+
+    def facing(x, y, tx, ty):
+        """The yaw (degrees, clockwise from downrange seen from above) that faces (tx, ty)."""
+        return round(math.degrees(math.atan2(ty - y, tx - x)), 1)
+
+    taken = []    # (x, y, r): things that stand on the ground, so nothing else lands on them
+
+    def free(x, y, r):
+        lx0, lx1, lw = CAMP_LANE
+        if lx0 - r < x < lx1 + r and abs(y) < lw + r:
+            return False
+        return all(math.hypot(x - a, y - b) >= r + c for a, b, c in taken)
+
+    def claim(x, y, r):
+        taken.append((x, y, r))
+
+    fx, fy = CAMP_FIRE
+    claim(fx, fy, 0.9)
+    claim(-0.07, -0.9, 0.35)                              # the yardage sign
+
+    logs = []
+    for ang in (40, 150, 260):
+        a = math.radians(ang)
+        x, y = fx + 1.45 * math.cos(a), fy + 1.45 * math.sin(a)
+        # yaw turns the log's length (its local right) to run around the fire
+        logs.append({"p": at(x, y), "len": m(1.3), "r": m(0.16), "yaw": float(ang)})
+        claim(x, y, 0.7)
+    chairs = []
+    for ang, color in ((95, "#2f4f7f"), (320, "#3f6b3a")):
+        a = math.radians(ang)
+        x, y = fx + 1.55 * math.cos(a), fy + 1.55 * math.sin(a)
+        chairs.append({"p": at(x, y), "yaw": facing(x, y, fx, fy), "size": m(0.55), "color": color})
+        claim(x, y, 0.45)
+
+    tents = [
+        {"kind": "aframe", "p": at(8.8, -3.2), "yaw": facing(8.8, -3.2, fx, fy), "l": m(2.2), "w": m(1.6),
+         "h": m(1.25), "color": "#d9772b", "glow": 0.0},
+        {"kind": "dome", "p": at(9.6, 5.2), "yaw": facing(9.6, 5.2, fx, fy), "l": m(2.4), "w": m(2.2),
+         "h": m(1.3), "color": "#4f8a3c", "glow": 0.6},
+    ]
+    claim(8.8, -3.2, 1.5)
+    claim(9.6, 5.2, 1.6)
+    table = {"p": at(6.2, -2.4), "yaw": 15.0, "l": m(1.8), "w": m(0.75), "h": m(0.75), "bench": m(0.45)}
+    claim(6.2, -2.4, 1.3)
+    cooler = {"p": at(5.0, -0.9), "yaw": 20.0, "size": [m(0.6), m(0.4), m(0.42)]}
+    claim(5.0, -0.9, 0.45)
+    woodpile = {"p": at(5.7, 4.6), "yaw": 30.0, "len": m(0.45), "r": m(0.07)}
+    claim(5.7, 4.6, 0.7)
+    stumps = [{"p": at(6.9, 2.9), "r": m(0.24), "h": m(0.4)}, {"p": at(-1.6, 4.6), "r": m(0.2), "h": m(0.3)}]
+    for s_ in ((6.9, 2.9), (-1.6, 4.6)):
+        claim(s_[0], s_[1], 0.4)
+    # a lantern on a shepherd's hook, just off the left of the starting view: it lights the board
+    hook = {"p": at(-0.4, -1.75), "h": m(1.7), "arm": m(0.3)}
+    claim(-0.4, -1.75, 0.3)
+
+    trees = []
+
+    def tree(x, y, kind, h, r):
+        trees.append({"p": at(x, y), "kind": kind, "h": m(h), "r": m(r), "yaw": round(rnd.uniform(0, 360), 1),
+                      "tint": round(rnd.uniform(0.75, 1.15), 3)})
+        claim(x, y, max(0.6, r * 0.45))
+
+    # the two trees the string lights hang between, and a few that frame the clearing
+    a_, b_ = (10.5, -6.5), (12.5, 7.5)
+    tree(a_[0], a_[1], "pine", 15.0, 3.0)
+    tree(b_[0], b_[1], "pine", 16.0, 3.2)
+    for x, y, kind, h, r in ((14.5, 0.8, "pine", 18.0, 3.6), (2.5, -9.5, "oak", 11.0, 3.4),
+                             (1.2, 9.6, "pine", 14.0, 2.8), (-4.0, -8.0, "pine", 13.0, 2.6),
+                             (-5.0, 8.5, "oak", 10.0, 3.0)):
+        tree(x, y, kind, h, r)
+    cx, cy = CAMP_CENTER
+    tries = 0
+    while len(trees) < 320 and tries < 20000:
+        tries += 1
+        ang = rnd.uniform(0, 2 * math.pi)
+        dist = CAMP_CLEARING_R + 2 + (rnd.random() ** 1.3) * 52
+        x, y = cx + dist * math.cos(ang), cy + dist * math.sin(ang)
+        kind = "pine" if rnd.random() < 0.72 else "oak"
+        h = rnd.uniform(10, 19) if kind == "pine" else rnd.uniform(7, 12)
+        r = h * rnd.uniform(0.17, 0.22) if kind == "pine" else rnd.uniform(2.4, 3.8)
+        if free(x, y, 1.6):
+            tree(x, y, kind, h, r)
+
+    # string lights: a sagging line of bulbs between the two trees, in front of their trunks
+    lights = []
+    ax, ay = a_[0] - 0.4, a_[1] + 0.35
+    bx, by = b_[0] - 0.4, b_[1] - 0.35
+    span = math.hypot(bx - ax, by - ay)
+    n = int(span / 0.45)
+    for i in range(n + 1):
+        u = i / n
+        z = 2.7 - 0.7 * 4 * u * (1 - u)
+        lights.append(at(ax + (bx - ax) * u, ay + (by - ay) * u, z))
+
+    rocks, bushes = [], []
+    while len(rocks) < 26:
+        ang, dist = rnd.uniform(0, 2 * math.pi), rnd.uniform(5.5, CAMP_CLEARING_R + 3)
+        x, y = cx + dist * math.cos(ang), cy + dist * math.sin(ang)
+        r = rnd.uniform(0.12, 0.45)
+        if free(x, y, r):
+            rocks.append({"p": at(x, y), "r": m(r), "yaw": round(rnd.uniform(0, 360), 1)})
+            claim(x, y, r)
+    while len(bushes) < 48:
+        ang, dist = rnd.uniform(0, 2 * math.pi), rnd.uniform(CAMP_CLEARING_R - 1, CAMP_CLEARING_R + 4)
+        x, y = cx + dist * math.cos(ang), cy + dist * math.sin(ang)
+        r = rnd.uniform(0.4, 1.1)
+        if free(x, y, r * 0.8):
+            bushes.append({"p": at(x, y), "r": m(r), "tint": round(rnd.uniform(0.7, 1.2), 3)})
+            claim(x, y, r * 0.8)
+
+    return {"k": round(k, 4), "center": at(cx, cy), "clearing_r": m(CAMP_CLEARING_R), "ground_r": m(140),
+            "fire": {"p": at(fx, fy), "r": m(0.55)}, "logs": logs, "chairs": chairs, "tents": tents,
+            "table": table, "cooler": cooler, "woodpile": woodpile, "stumps": stumps, "hook": hook,
+            "trees": trees, "lights": lights, "rocks": rocks, "bushes": bushes}
 
 
 class Bag:

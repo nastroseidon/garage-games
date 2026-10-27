@@ -66,6 +66,43 @@ class BoardTests(unittest.TestCase):
         return (sum(d[k] * right[k] for k in range(3)) / depth / (tan_h * C.SCREEN_W_FT / C.SCREEN_H_FT),
                 sum(d[k] * up[k] for k in range(3)) / depth / tan_h)
 
+    def test_the_campsite_is_the_same_real_size_camp_at_every_distance(self):
+        def real(d):
+            b = C.Board(d)
+            c = b.info()["camp"]
+            pts = [c["fire"]["p"]] + [t["p"] for t in c["tents"]] + [t["p"] for t in c["trees"][:20]] + c["lights"]
+            return [[round(v, 2) for v in b.from_range(*p)] for p in pts], c["trees"][0]["h"] / c["k"]
+        near, far = real(30), real(250)
+        self.assertEqual(near[0], far[0])
+        self.assertAlmostEqual(near[1], 15.0, places=3)    # a 15 m pine, at every hole distance
+        self.assertAlmostEqual(far[1], 15.0, places=3)
+
+    def test_nothing_in_the_campsite_stands_in_the_bags_way(self):
+        b = C.Board(100)
+        c = b.info()["camp"]
+        x0, x1, half = C.CAMP_LANE
+        things = ([c["fire"], c["table"], c["cooler"], c["woodpile"], c["hook"]] + c["logs"] + c["chairs"] + c["tents"]
+                  + c["stumps"] + c["trees"] + c["rocks"] + c["bushes"])
+        for t in things:
+            x, y, _ = b.from_range(*t["p"])
+            self.assertFalse(x0 < x < x1 and abs(y) < half, t)
+        # the thrower stands inside the lane, the board is inside it, and the trees stay out of the clearing
+        self.assertLess(x0, -2.5)
+        self.assertGreater(x1, b.x1)
+        for t in c["trees"]:
+            x, y, _ = b.from_range(*t["p"])
+            self.assertGreater(C.math.hypot(x - C.CAMP_CENTER[0], y - C.CAMP_CENTER[1]), 6.5)
+
+    def test_the_fire_and_lights_are_in_the_starting_view(self):
+        b = C.Board(100)
+        c = b.info()["camp"]
+        x, y = self.on_tee_screen(b, c["fire"]["p"])
+        self.assertTrue(0.3 < x < 1 and -1 < y < 1, (x, y))      # right of the board, in the picture
+        for p in c["lights"]:
+            x, y = self.on_tee_screen(b, p)
+            self.assertTrue(-1 < y < 1, y)
+            self.assertGreater(p[2], 0)
+
     def test_the_yardage_sign_stands_clear_of_the_board(self):
         for d in (30, 100, 250):
             b = C.Board(d)

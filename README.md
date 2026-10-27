@@ -128,8 +128,15 @@ standing on the range.
   so the board stays centred on the screen. The game score, side against side,
   sits at the top of the sidebar in each side's color. Each player's row shows what they have on the
   board this inning.
-- **The set.** Just the board and grass: the range's nets, poles, light
-  towers and yardage markers are hidden for this game. A crooked, hand-painted
+- **The set.** A campsite in the woods at night, at the board's scale: real-size
+  grass in a clearing, a crackling campfire with sparks and smoke, two tents,
+  a picnic table with a lantern, a cooler, log seats, camp chairs, a woodpile,
+  string lights between two pines, and a few hundred trees fading into the
+  dark. A lantern on a shepherd's hook, just off the left of the screen, lights
+  the board. The layout is laid out at real size in `cornhole.campsite` and
+  scaled with the board, so it is the same camp at every hole distance. (Web
+  view only for now; Unreal still shows the range.) The range's nets, poles,
+  light towers and yardage markers are hidden for this game. A crooked, hand-painted
   sign left of the board shows the hole distance. In the starting view it is
   level with the hole, halfway between the board and the screen's left edge.
 - **Skip** counts as a thrown bag that scored nothing. **Undo** puts the board
