@@ -182,6 +182,30 @@ node tests/test_director.js               # broadcast triggers + camera plans
 python tools/fake_launch_monitor.py -n 5  # send 5 fake shots over Open Connect
 ```
 
+## Unreal Engine files
+
+The Unreal Engine version of the graphics will live in `unreal/GarageGames/`.
+Before working on it:
+
+- **Install Git LFS** (<https://git-lfs.com>) and run `git lfs install` once
+  on each PC. Unreal assets (`.uasset`, `.umap`, ...) and the source art,
+  audio and video inside `unreal/` are stored in Git LFS (see
+  `.gitattributes`). Without it, a clone only gets small pointer files instead
+  of the real assets. GitHub's free plan has a limited amount of LFS storage
+  and download traffic, so keep large source files out when you can.
+- **Never commit** these (`.gitignore` blocks them):
+  - folders Unreal rebuilds: `Binaries/`, `Intermediate/`, `Saved/`,
+    `DerivedDataCache/`, packaged builds, and IDE files
+  - Unreal Engine itself, whether from the Epic Games Launcher or built from
+    source
+  - paid or licensed content: Fab, Marketplace and Quixel assets, and Epic's
+    Starter Content. Fab and Quixel Bridge import into `Content/Fab/` and
+    `Content/Megascans/` by default; put any other third-party assets in
+    `Content/ThirdParty/`. Their licenses don't allow sharing them in a public
+    repo, so anyone else who builds the project has to get them themselves.
+- `tests/test_repo_rules.py` checks these rules, and fails if a big binary
+  file or an Unreal asset gets committed outside Git LFS.
+
 ## Safety
 
 Use foam or practice balls in the garage, keep kids well back from the
