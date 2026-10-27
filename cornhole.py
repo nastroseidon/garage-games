@@ -252,6 +252,13 @@ def _step(board, b, t, dt):
             if edge:
                 b.state, b.how = "falling", edge
                 b.p = board.on_top(min(max(a, 0.0), board.L), c, BAG_T / 2)
+                # it falls from just past the edge (from inside it, the frame would stop it dead underneath)
+                if edge == "off_back":
+                    b.p[0] = max(b.p[0], board.x1 + BAG / 2)
+                elif edge == "off_front":
+                    b.p[0] = min(b.p[0], board.x0 - BAG / 2)
+                else:
+                    b.p[1] = math.copysign(board.W / 2 + BAG / 2, c)
                 b.v = [va * board.cos, vc, va * board.sin]
     elif b.state == "falling":
         b.v[2] -= G * dt
@@ -365,11 +372,13 @@ def throw(board, bags, shot, side, player, seed=0, frames=True):
 def cameras(board):
     """Camera positions (yards). "tee" is the golfer's view, life-size on the garage screen."""
     i = board.info()
-    cx, hx, ln = i["center"][0], i["hole"][0], max(i["length"], 1.0)
+    hx, hz, ln = i["hole"][0], i["hole"][2], max(i["length"], 1.0)
     return {
         "tee": {"pos": [0, 0, TEE_EYE_YD], "look": [hx, 0, TEE_EYE_YD], "fov": round(TEE_FOV, 2)},
-        "board": {"pos": [cx - 2.4 * ln, -1.4 * ln, 1.1 * ln], "look": [cx + 0.1 * ln, 0, 0.12 * ln], "fov": 38},
-        "top": {"pos": [cx - 1.2 * ln, 0, 2.0 * ln], "look": [cx + 0.15 * ln, 0, 0], "fov": 42},
+        # in close over the front-left corner, on the top half of the board where the bags land and bump
+        "board": {"pos": [hx - 0.9 * ln, -0.55 * ln, hz + 0.75 * ln], "look": [hx - 0.08 * ln, 0, hz], "fov": 36},
+        # high over the front of the board: the whole top and the grass behind it, where knocked bags fall
+        "top": {"pos": [hx - 0.55 * ln, 0, hz + 1.5 * ln], "look": [hx + 0.05 * ln, 0, 0], "fov": 48},
     }
 
 
