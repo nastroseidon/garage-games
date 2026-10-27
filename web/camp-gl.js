@@ -482,7 +482,8 @@ export function buildCamp(camp, opts) {
   };
 
   // shepherd's hooks either side of the board, just out of the starting view: they light it
-  camp.hooks.forEach((hk) => {
+  // (a server from before the second hook sends just the left one, as "hook")
+  (camp.hooks || [Object.assign({ side: -1 }, camp.hook)]).forEach((hk) => {
     const hook = new THREE.Group(), reach = -hk.side * hk.arm;   // the arm reaches in towards the board
     hook.position.copy(toV(hk.p));
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012 * k, 0.014 * k, hk.h, 8), metal);

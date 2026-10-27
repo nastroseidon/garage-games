@@ -322,7 +322,8 @@ class Camp:
     def lamps(self):
         c, k = self.c, self.k
         # lanterns on shepherd's hooks either side of the board, just out of the starting view: they light it
-        for hk in c["hooks"]:
+        # (a server from before the second hook sends just the left one, as "hook")
+        for hk in c.get("hooks") or [dict(c["hook"], side=-1)]:
             p, h, reach = hk["p"], hk["h"], -hk["side"] * hk["arm"]    # the arm reaches in towards the board
             self.part("Cylinder", METAL, _add(p, [0, 0, h / 2]), [0.026 * k, 0.026 * k, h])
             self.part("Cube", METAL, _add(p, [0, reach / 2, h]), [0.015 * k, hk["arm"], 0.015 * k])
