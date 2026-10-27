@@ -119,7 +119,66 @@ class Board:
                 "hole_r": round(self.hole_r * k, 4), "slope_deg": round(math.degrees(SLOPE), 3),
                 "front": self.to_range([self.x0, 0, FRONT_H]),
                 "back": self.to_range([self.x1, 0, BACK_H]),
-                "frame": round(FRAME_H * k, 4), "bag": round(BAG * k, 4), "bag_t": round(BAG_T * k, 4)}
+                "frame": round(FRAME_H * k, 4), "bag": round(BAG * k, 4), "bag_t": round(BAG_T * k, 4),
+                "sign": yardage_sign(self)}
+
+
+# ---- the yardage sign: a crooked, hand-painted plank on a post, off to the left ----
+# Brush strokes for the digits, in a box 0.6 wide and 1 tall (x right, y up).
+GLYPHS = {
+    "0": [[(0.3, 1.0), (0.12, 0.92), (0.03, 0.7), (0.02, 0.4), (0.08, 0.14), (0.25, 0.0), (0.42, 0.04),
+           (0.55, 0.25), (0.58, 0.55), (0.52, 0.85), (0.38, 0.99), (0.24, 0.96)]],
+    "1": [[(0.12, 0.8), (0.32, 1.0), (0.33, 0.0)]],
+    "2": [[(0.04, 0.76), (0.14, 0.95), (0.34, 1.0), (0.52, 0.9), (0.55, 0.7), (0.44, 0.48), (0.06, 0.02),
+           (0.6, 0.0)]],
+    "3": [[(0.04, 0.9), (0.28, 1.0), (0.5, 0.92), (0.52, 0.72), (0.28, 0.56)],
+          [(0.26, 0.56), (0.52, 0.44), (0.56, 0.18), (0.36, 0.0), (0.04, 0.08)]],
+    "5": [[(0.56, 1.0), (0.1, 0.99), (0.07, 0.58), (0.3, 0.63), (0.52, 0.5), (0.56, 0.24), (0.4, 0.03),
+           (0.2, 0.0), (0.02, 0.1)]],
+    "7": [[(0.02, 0.99), (0.6, 1.0), (0.22, 0.0)]],
+}
+for _d in "4689":
+    GLYPHS.setdefault(_d, GLYPHS["0"])
+
+
+def yardage_sign(board):
+    """The sign's size, where it stands and its brush strokes, in yards on the range.
+    base is the foot of the post; u, v, n are the plank's right, up and out-of-the-face
+    directions (n faces the tee, the whole thing leans a little). Strokes are [a, b] points
+    across (a) and up (b) the plank's face from its centre."""
+    import random
+    rnd = random.Random(int(board.distance_yd))
+    ln = board.L * board.s / YD                     # the board's length in yards
+    hx = board.distance_yd
+    hw = board.W * board.s / YD / 2
+    base = [round(hx * 0.62, 3), round(-(hw + 1.15 * hw), 3), 0.0]
+    heading = math.atan2(-base[1], -base[0]) + math.radians(rnd.uniform(4, 9))   # turned toward the tee
+    nvec = [math.cos(heading), math.sin(heading), 0.0]
+    lean = math.radians(rnd.choice((-1, 1)) * rnd.uniform(4, 7))
+    r = [nvec[1], -nvec[0], 0.0]                    # the viewer's right
+    u = [r[0] * math.cos(lean), r[1] * math.cos(lean), -math.sin(lean)]
+    v = [r[0] * math.sin(lean), r[1] * math.sin(lean), math.cos(lean)]
+    w, h = 0.34 * ln, 0.13 * ln
+    text = str(int(board.distance_yd))
+    th = 0.66 * h                                   # letter height
+    gap = 0.16 * th
+    width = len(text) * 0.6 * th + (len(text) - 1) * gap
+    strokes, x = [], -width / 2
+    for ch in text:
+        tilt = math.radians(rnd.uniform(-5, 5))
+        lift = rnd.uniform(-0.05, 0.05) * th
+        for line in GLYPHS[ch]:
+            pts = []
+            for gx, gy in line:
+                px = (gx - 0.3) * th + rnd.uniform(-0.025, 0.025) * th
+                py = (gy - 0.5) * th + rnd.uniform(-0.025, 0.025) * th
+                pts.append([round(x + 0.3 * th + px * math.cos(tilt) - py * math.sin(tilt), 4),
+                            round(lift + px * math.sin(tilt) + py * math.cos(tilt), 4)])
+            strokes.append({"pts": pts, "w": round(th * rnd.uniform(0.15, 0.18), 4)})
+        x += 0.6 * th + gap
+    return {"text": text, "base": base, "u": [round(c, 5) for c in u], "v": [round(c, 5) for c in v],
+            "n": [round(c, 5) for c in nvec], "w": round(w, 4), "h": round(h, 4), "t": round(0.02 * ln, 4),
+            "post_h": round(0.16 * ln, 4), "post_w": round(0.035 * ln, 4), "strokes": strokes}
 
 
 class Bag:

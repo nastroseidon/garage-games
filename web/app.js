@@ -268,7 +268,27 @@
     $("up-name").style.color = cur.color;
     $("up-task").textContent = cur.task;
     $("round-info").textContent = s.round_info;
+    renderHeadline(s.headline);
     renderBoard($("scoreboard"), s.scoreboard, s.numbered);
+  }
+
+  // head-to-head game score (Golf Cornhole), each side's number in its own color
+  function renderHeadline(h) {
+    var box = $("h2h");
+    box.innerHTML = "";
+    box.style.display = h ? "" : "none";
+    $("board-title").textContent = h && h.board_title ? h.board_title : "Scoreboard";
+    if (!h) return;
+    box.appendChild(el("div", "small", h.label));
+    var row = el("div", "h2h-row");
+    h.sides.forEach(function (sd, i) {
+      if (i) row.appendChild(el("span", "h2h-dash", "-"));
+      var v = el("span", "h2h-val", String(sd.value));
+      v.style.color = sd.color;
+      v.title = sd.name;
+      row.appendChild(v);
+    });
+    box.appendChild(row);
   }
 
   function renderLastShot(shot) {

@@ -64,6 +64,7 @@ class RangeGL {
     this.shotId = null;
     this.flashUntil = 0;
 
+    this.dressing = [];     // nets, poles, light towers, yardage signs and lines: hidden for Golf Cornhole
     this.buildSky();
     this.buildGround();
     this.buildNets();
@@ -119,10 +120,13 @@ class RangeGL {
     const trees = canvasTexture(1024, 128, (g, w, h) => {
       g.fillStyle = "#08130e";
       g.beginPath(); g.moveTo(0, h);
+      // the two ends meet where the texture repeats, so they share a height (no seam spike)
+      const wave = (x) => 0.18 * Math.sin(x * 2 * Math.PI * 2 / w) + 0.12 * Math.sin(x * 2 * Math.PI * 8 / w + 2);
       for (let x = 0; x <= w; x += 6) {
-        const top = h * (0.45 + 0.18 * Math.sin(x * 0.013) + 0.12 * Math.sin(x * 0.051 + 2) + 0.08 * Math.random());
-        g.lineTo(x, top);
+        const edge = x < 12 || x > w - 12 ? 0 : 0.08 * Math.random();
+        g.lineTo(x, h * (0.45 + wave(x) + edge));
       }
+      g.lineTo(w, h * (0.45 + wave(w)));   // right to the edge: the last step stops short of it
       g.lineTo(w, h); g.closePath(); g.fill();
     });
     trees.wrapS = THREE.RepeatWrapping; trees.repeat.set(6, 1);
@@ -163,6 +167,7 @@ class RangeGL {
       m.rotation.x = -Math.PI / 2;
       m.position.set(0, 0.01, -d);
       this.scene.add(m);
+      this.dressing.push(m);
     }
   }
 
@@ -182,10 +187,12 @@ class RangeGL {
       net.rotation.y = Math.PI / 2;
       net.position.set(side * FIELD_WIDTH, 13, -(FIELD_DEPTH - 10) / 2);
       this.scene.add(net);
+      this.dressing.push(net);
     });
     const back = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_WIDTH * 2, 26), netMat(FIELD_WIDTH * 2));
     back.position.set(0, 13, -FIELD_DEPTH);
     this.scene.add(back);
+    this.dressing.push(back);
 
     const poles = [];
     for (let d = 0; d <= FIELD_DEPTH; d += 30) poles.push([d, -FIELD_WIDTH], [d, FIELD_WIDTH]);
@@ -196,6 +203,7 @@ class RangeGL {
     poles.forEach((p, i) => { m.makeTranslation(p[1], 13.5, -p[0]); pm.setMatrixAt(i, m); });
     pm.castShadow = true;
     this.scene.add(pm);
+    this.dressing.push(pm);
   }
 
   buildLights() {
@@ -227,6 +235,7 @@ class RangeGL {
       halo.position.copy(head.position);
       halo.scale.set(9, 9, 1);
       this.scene.add(pole, head, halo);
+      this.dressing.push(pole, head, halo);
     }));
   }
 
@@ -246,6 +255,7 @@ class RangeGL {
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.5, 0.3), new THREE.MeshStandardMaterial({ color: 0x444444 }));
         post.position.set(side * (FIELD_WIDTH - 7), 0.6, -d);
         this.scene.add(sign, post);
+        this.dressing.push(sign, post);
       });
     }
   }
@@ -441,14 +451,81 @@ class RangeGL {
       group.add(m);
       bags.push(m);
     }
+    if (info.sign) group.add(this.buildYardageSign(info.sign));
     this.scene.add(group);
     this.cornhole = { key, group, bags };
+  }
+
+  /* A weathered plank on a post with the yardage painted on by hand (layout from the server, in yards). */
+  buildYardageSign(sg) {
+    const grp = new THREE.Group();
+    const U = toV(sg.u), V = toV(sg.v), N = toV(sg.n);
+    grp.matrixAutoUpdate = false;
+    grp.matrix.makeBasis(U, V, N).setPosition(toV(sg.base));
+    const W = 1024, H = Math.round(1024 * sg.h / sg.w);
+    const tex = canvasTexture(W, H, (g) => {
+      // planks: warm wood, grain, a split between the boards, darker worn edges
+      g.fillStyle = "#b8864e"; g.fillRect(0, 0, W, H);
+      for (let i = 0; i < 70; i++) {
+        g.strokeStyle = "rgba(70,40,15," + (0.08 + Math.random() * 0.12) + ")";
+        g.lineWidth = 1 + Math.random() * 3;
+        const y = Math.random() * H;
+        g.beginPath(); g.moveTo(0, y);
+        for (let x = 0; x <= W; x += 64) g.lineTo(x, y + Math.sin(x * 0.01 + i) * 6);
+        g.stroke();
+      }
+      g.fillStyle = "rgba(50,28,10,0.55)"; g.fillRect(0, H * 0.5 - 3, W, 6);
+      const edge = g.createLinearGradient(0, 0, 0, H);
+      edge.addColorStop(0, "rgba(40,20,5,0.45)"); edge.addColorStop(0.12, "rgba(0,0,0,0)");
+      edge.addColorStop(0.88, "rgba(0,0,0,0)"); edge.addColorStop(1, "rgba(40,20,5,0.5)");
+      g.fillStyle = edge; g.fillRect(0, 0, W, H);
+      // the numbers, slapped on with a brush: a few dry passes, then a drip or two
+      const px = (p) => [(p[0] / sg.w + 0.5) * W, (0.5 - p[1] / sg.h) * H];
+      g.lineCap = g.lineJoin = "round";
+      sg.strokes.forEach((st, k) => {
+        const lw = st.w / sg.h * H;
+        for (let pass = 0; pass < 4; pass++) {
+          g.strokeStyle = pass === 0 ? "rgba(22,14,8,0.95)" : "rgba(22,14,8,0.35)";
+          g.lineWidth = lw * (pass === 0 ? 1 : 0.55 + Math.random() * 0.5);
+          // smooth curves through the midpoints, so round numbers come out round
+          const j = pass ? lw * 0.18 : 0;
+          const q = st.pts.map((p) => { const a = px(p); return [a[0] + (Math.random() - 0.5) * j, a[1] + (Math.random() - 0.5) * j]; });
+          g.beginPath();
+          g.moveTo(q[0][0], q[0][1]);
+          const curvy = q.length >= 6;   // 1 and 7 keep their sharp corners
+          for (let i = 1; i < q.length - 1; i++) {
+            if (!curvy) { g.lineTo(q[i][0], q[i][1]); continue; }
+            g.quadraticCurveTo(q[i][0], q[i][1], (q[i][0] + q[i + 1][0]) / 2, (q[i][1] + q[i + 1][1]) / 2);
+          }
+          g.lineTo(q[q.length - 1][0], q[q.length - 1][1]);
+          g.stroke();
+        }
+        if (k % 2 === 0) {
+          const low = st.pts.reduce((a, b) => (b[1] < a[1] ? b : a));
+          const q = px(low), len = lw * (0.8 + Math.random() * 1.6);
+          g.fillStyle = "rgba(22,14,8,0.9)";
+          g.fillRect(q[0] - lw * 0.12, q[1], lw * 0.24, len);
+          g.beginPath(); g.arc(q[0], q[1] + len, lw * 0.2, 0, Math.PI * 2); g.fill();
+        }
+      });
+    });
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6034, roughness: 0.95 });
+    const face = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(sg.w, sg.h, sg.t), [wood, wood, wood, wood, face, wood]);
+    plank.position.set(0, sg.post_h + sg.h / 2, 0);
+    const postLen = sg.post_h + sg.h * 0.85;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(sg.post_w, postLen, sg.post_w * 0.8), wood);
+    post.position.set(0, postLen / 2, -sg.t / 2 - sg.post_w * 0.4);
+    plank.castShadow = post.castShadow = true;
+    grp.add(plank, post);
+    return grp;
   }
 
   showCornhole(c) {
     const on = !!c;
     if (on) this.setCornhole(c.board);
     if (this.cornhole) this.cornhole.group.visible = on;
+    this.dressing.forEach((o) => { o.visible = !on; });
     this.targetObjs.forEach((o) => { o.grp.visible = !on; });
     if (!on) return;
     this.cornhole.bags.forEach((m, i) => {
@@ -527,7 +604,12 @@ class RangeGL {
       const key = ch ? "idle-cornhole" : "idle";
       const want = toV(cam.pos);
       if (this.camKey !== key) { this.camera.position.copy(want); this.look.copy(toV(cam.look)); }
-      else this.camera.position.lerp(want, 1 - Math.exp(-2 * dt));
+      else {
+        // glide there, aim included (a new hole distance moves both)
+        const k = 1 - Math.exp(-2 * dt);
+        this.camera.position.lerp(want, k);
+        this.look.lerp(toV(cam.look), k);
+      }
       this.camKey = key;
     }
     if (this.camera.fov !== cam.fov) { this.camera.fov = cam.fov; this.camera.updateProjectionMatrix(); }

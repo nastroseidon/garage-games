@@ -162,6 +162,10 @@ class Game:
         """Game-specific state for the screens (None: nothing)."""
         return None
 
+    def headline(self, ctx):
+        """A head-to-head game score shown above the scoreboard (None: no headline)."""
+        return None
+
     def test_shot(self, t, ctx, idx):
         """Launch numbers for a test shot ({} lets the server pick by test_kind)."""
         return {}
@@ -770,8 +774,10 @@ class Cornhole(Game):
             else:
                 hi = mid
         rng = self.rng
+        # about one swing in five is pushed or pulled far enough to miss the board to the side
+        hla = rng.choice((-1, 1)) * rng.uniform(8, 12) if rng.random() < 0.2 else rng.uniform(-3, 3)
         return {"speed_mph": lo * rng.uniform(0.95, 1.04), "vla_deg": vla + rng.uniform(-2, 2),
-                "hla_deg": rng.uniform(-3, 3), "spin_rpm": spin * rng.uniform(0.9, 1.1),
+                "hla_deg": hla, "spin_rpm": spin * rng.uniform(0.9, 1.1),
                 "spin_axis_deg": rng.uniform(-6, 6)}
 
     # ---- a throw ----
@@ -861,11 +867,18 @@ class Cornhole(Game):
         for s, side in enumerate(self.sides(ctx)):
             left = BAGS_PER_SIDE - thrown[s] if not st["clear"] else BAGS_PER_SIDE
             on = sum(b.points for b in st["bags"] if b.side == s) if not st["clear"] else 0
+            # the row shows this inning's points; the game score is the headline above
             rows.append({"name": side["name"], "color": side["color"],
-                         "sub": "%d bag%s left · %d this inning" % (left, "" if left == 1 else "s", on),
-                         "value": str(st["scores"][s]),
+                         "sub": "%d bag%s left" % (left, "" if left == 1 else "s"),
+                         "value": str(on),
                          "current": current >= 0 and self.side_of(current) == s})
         return rows
+
+    def headline(self, ctx):
+        st = ctx.cornhole
+        return {"label": "GAME · TO %d" % st["to"], "board_title": "Inning %d" % st["inning"],
+                "sides": [{"name": side["name"], "color": side["color"], "value": st["scores"][s]}
+                          for s, side in enumerate(self.sides(ctx))]}
 
     def winner_text(self, ctx):
         st = ctx.cornhole

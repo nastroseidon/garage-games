@@ -49,6 +49,20 @@ class BoardTests(unittest.TestCase):
             # the hole's centre is 9 in from the back: 3 hole radii
             self.assertAlmostEqual(i["back"][0] - i["hole"][0], 3 * hole * C.math.cos(C.SLOPE), delta=0.01 * d)
 
+    def test_the_yardage_sign_stands_clear_of_the_board(self):
+        for d in (30, 100, 250):
+            b = C.Board(d)
+            i = b.info()
+            sg = i["sign"]
+            self.assertEqual(sg["text"], str(d))
+            self.assertTrue(sg["strokes"])
+            # left of the board's edge, beside its front, facing back toward the tee
+            self.assertLess(sg["base"][1] + sg["w"] / 2, -i["width"] / 2)
+            self.assertLess(sg["base"][0], i["front"][0] + 0.1 * i["length"])
+            self.assertLess(sg["n"][0], 0)
+            lean = C.math.degrees(C.math.asin(abs(sg["u"][2])))
+            self.assertTrue(3 < lean < 10, lean)
+
     def test_tee_camera_matches_the_garage_screen(self):
         cam = C.idle_camera(C.Board(100))
         self.assertAlmostEqual(cam["fov"], 48.46, places=1)   # 9 ft tall screen seen from 10 ft
@@ -160,8 +174,19 @@ class RuleTests(unittest.TestCase):
         # Dad scored, so Dad throws first again; even innings cancel and keep the order
         self.assertEqual(s.current()[0], 0)
         snap = s.snapshot()
-        self.assertEqual(snap["scoreboard"][0]["value"], "3")
+        self.assertEqual([x["value"] for x in snap["headline"]["sides"]], [3, 0])   # the game, head to head
+        self.assertEqual(snap["headline"]["sides"][1]["color"], "#ff6b6b")
+        self.assertEqual(snap["scoreboard"][0]["value"], "0")                     # inning 2 hasn't started
         self.assertIn("INNING 2", snap["round_info"])
+
+    def test_scoreboard_rows_show_this_innings_points(self):
+        s = new_game()
+        self.play(s, 100.5, 0)          # Dad: in the hole
+        self.play(s, 92, 0)             # Sam: on the board
+        rows = s.snapshot()["scoreboard"]
+        self.assertEqual([r["value"] for r in rows], ["3", "1"])
+        self.assertEqual(rows[0]["sub"], "3 bags left")
+        self.assertEqual([x["value"] for x in s.snapshot()["headline"]["sides"]], [0, 0])
 
     def test_first_to_the_target_at_the_end_of_an_inning_wins(self):
         s = new_game(to=11)
@@ -221,6 +246,13 @@ class RuleTests(unittest.TestCase):
         extra = ev["state"]["extra"]
         self.assertEqual(len(extra["bags"]), 2)
         self.assertIn("board", extra)
+
+    def test_some_test_shots_miss_to_either_side(self):
+        s = new_game()
+        hla = [s.test_shot()["hla_deg"] for _ in range(300)]
+        wide = [h for h in hla if abs(h) >= 8]
+        self.assertTrue(30 < len(wide) < 100, len(wide))
+        self.assertTrue(any(h < 0 for h in wide) and any(h > 0 for h in wide))
 
     def test_test_shots_aim_at_the_hole(self):
         s = new_game(distance=150)

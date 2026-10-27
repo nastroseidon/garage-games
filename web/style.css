@@ -191,6 +191,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .scoreboard .sname { flex: 1; font-weight: 700; }
 .scoreboard .sval { font-weight: 800; font-variant-numeric: tabular-nums; }
 .scoreboard .ssub { font-size: 13px; color: var(--muted); }
+.h2h:empty { display: none; }
+.h2h { background: var(--panel-2); border-radius: 16px; padding: 10px 16px; text-align: center; }
+.h2h-row { display: flex; justify-content: center; align-items: baseline; gap: 18px; font-size: 56px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.h2h-dash { color: var(--muted); font-size: 40px; }
 
 .result-banner {
   position: absolute; left: 50%; bottom: 4%;
