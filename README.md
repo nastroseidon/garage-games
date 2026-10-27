@@ -90,7 +90,7 @@ In the classic games, a player marked **Junior** gets targets at half the
 distance (and half the speed in Hit the Number). In Long Drive their carry
 counts double.
 
-### 🌽 Golf Cornhole (3D)
+### Golf Cornhole (3D)
 
 Your shot becomes a cornhole bag. It flies your ball's real flight and lands
 where the ball would have landed on a driving range, on a giant cornhole board
