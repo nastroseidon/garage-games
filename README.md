@@ -134,8 +134,10 @@ standing on the range.
   string lights between two pines, and a few hundred trees fading into the
   dark. A lantern on a shepherd's hook, just off the left of the screen, lights
   the board. The layout is laid out at real size in `cornhole.campsite` and
-  scaled with the board, so it is the same camp at every hole distance. (Web
-  view only for now; Unreal still shows the range.) The range's nets, poles,
+  scaled with the board, so it is the same camp at every hole distance. Unreal
+  builds the same camp from engine shapes (`garage_camp.py`), with the fire's
+  flames and light flickering, and puts the range and its lighting back when
+  another game starts. The range's nets, poles,
   light towers and yardage markers are hidden for this game. A crooked, hand-painted
   sign left of the board shows the hole distance. In the starting view it is
   level with the hole, halfway between the board and the screen's left edge.
