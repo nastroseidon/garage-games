@@ -154,8 +154,9 @@ Keep in mind:
 
 ## Unreal Engine files
 
-The Unreal Engine version of the graphics will live in `unreal/GarageGames/`.
-Before working on it:
+The Unreal Engine version of the graphics lives in `unreal/GarageGames/`
+(a proof of concept). **How to open it and play shots in Unreal:** see
+[unreal/README.md](unreal/README.md). Before working on it:
 
 - **Install Git LFS** (<https://git-lfs.com>) and run `git lfs install` once
   on each PC. Unreal assets (`.uasset`, `.umap`, ...) and the source art,
