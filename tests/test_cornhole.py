@@ -282,8 +282,72 @@ class RuleTests(unittest.TestCase):
     def test_test_shots_aim_at_the_hole(self):
         s = new_game(distance=150)
         opts = s.test_shot()
-        f = simulate(opts["speed_mph"], opts["vla_deg"], 0, opts["spin_rpm"], 0)
+        f = simulate(opts["speed_mph"], opts["vla_deg"], 0, opts["spin_rpm"], opts["spin_axis_deg"])
         self.assertAlmostEqual(f["carry_yd"], 150, delta=12)
+
+    def test_test_shots_vary_their_flight(self):
+        s = new_game(distance=100)                          # an iron: about 18 degrees of launch
+        shots = [s.test_shot() for _ in range(200)]
+        vla = [o["vla_deg"] for o in shots]
+        self.assertTrue(any(v < 11 for v in vla) and any(v > 25 for v in vla))     # stingers and high shots
+        self.assertTrue(any(o["spin_axis_deg"] < -12 for o in shots) and any(o["spin_axis_deg"] > 12 for o in shots))
+        # a big draw or fade starts out the other way and still comes back near the board
+        for o in shots:
+            if abs(o["spin_axis_deg"]) >= 12 and abs(o["hla_deg"]) < 8:
+                f = simulate(o["speed_mph"], o["vla_deg"], o["hla_deg"], o["spin_rpm"], o["spin_axis_deg"])
+                self.assertLess(abs(f["offline_yd"]), 12)
+
+
+class BagFlightTests(unittest.TestCase):
+    def flight_to(self, board, vla, spin):
+        lo, hi = 5.0, 200.0
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            if simulate(mid, vla, 0, spin, 0)["carry_yd"] < board.distance_yd - 1:
+                lo = mid
+            else:
+                hi = mid
+        path, _ = C._flight_frames(board, simulate(lo, vla, 0, spin, 0), True)
+        return path
+
+    @staticmethod
+    def angle_in(path):
+        """How steeply the bag comes down over the last tenth of its flight, in degrees."""
+        k = len(path) - 1
+        j = int(k * 0.9)
+        return C.math.degrees(C.math.atan2(path[j][2] - path[k][2], path[k][0] - path[j][0]))
+
+    def test_low_shots_fly_low_and_high_shots_drop_in_steeply(self):
+        for d in (30, 100):
+            b = C.Board(d)
+            stinger, normal, high = (self.flight_to(b, 9.8, 3500), self.flight_to(b, 18, 6500),
+                                     self.flight_to(b, 28, 7400))
+            apex = [max(p[2] for p in f) for f in (stinger, normal, high)]
+            angle = [self.angle_in(f) for f in (stinger, normal, high)]
+            self.assertTrue(apex[0] < apex[1] < apex[2], apex)
+            self.assertTrue(0 < angle[0] < angle[1] < angle[2], angle)
+            self.assertGreater(angle[2] - angle[0], 20)
+
+    def test_a_bag_never_climbs_into_the_board(self):
+        b = C.Board(100)
+        for vla, spin in ((8, 3000), (9.8, 3500), (18, 6500)):
+            path = self.flight_to(b, vla, spin)
+            k = len(path)
+            tail = [p[2] for p in path[int(k * 0.8):]]
+            self.assertTrue(all(b <= a + 1e-6 for a, b in zip(tail, tail[1:])), (vla, tail))
+
+    def test_the_bag_spins_with_the_balls_side_spin_only(self):
+        self.assertEqual(C.bag_spin({"spin_rpm": 9000, "spin_axis_deg": 0}), 0.0)     # pure backspin: no spin
+        fade = C.bag_spin({"spin_rpm": 6000, "spin_axis_deg": 8})
+        draw = C.bag_spin({"spin_rpm": 6000, "spin_axis_deg": -8})
+        self.assertGreater(fade, 0)                                                   # clockwise from above
+        self.assertAlmostEqual(draw, -fade)
+        self.assertGreater(C.bag_spin({"spin_rpm": 6000, "spin_axis_deg": 15}), fade)
+        self.assertEqual(C.bag_spin({"spin_rpm": 9000, "spin_axis_deg": 40}), C.BAG_SPIN_MAX)
+        # in the air the bag only turns flat; it never pitches or rolls
+        sim = C.throw(C.Board(100), [], shot(100), 0, 0)
+        air = [f[-1] for f in sim["frames"][:10]]
+        self.assertTrue(all(p[4] == 0.0 for p in air))
 
 
 if __name__ == "__main__":

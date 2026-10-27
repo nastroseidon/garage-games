@@ -60,6 +60,8 @@ SLIDE_PER_ROLL = 1.5        # board slide = the ball's roll on the range x this
 BAG_BOUNCE = 0.2            # bag-on-bag restitution
 STOP = 0.02                 # m/s: slower than this counts as stopped
 SPIN_DRAG = 12.0            # rad/s^2 a sliding bag's spin slows by
+BAG_SPIN_PER_RPM = 4 * math.pi / 1000   # 1000 rpm of side spin on the ball: the bag turns twice a second
+BAG_SPIN_MAX = 8 * math.pi              # four turns a second at most
 HOLE_DROP_S = 0.3           # how long the drop through the hole takes on screen
 
 DT_SLIDE = 1.0 / 600
@@ -266,7 +268,9 @@ def _flight_frames(board, flight, lands_on_board):
         i = min(int(x), len(pts) - 2)
         f = x - i
         p = [pts[i][j] + (pts[i + 1][j] - pts[i][j]) * f for j in range(3)]
-        p[2] += end_h * u ** 3
+        # lift the flight onto the (raised) board evenly, so the bag comes down at close to the
+        # ball's own angle: a stinger stays low and flat, a high shot drops in steeply
+        p[2] += end_h * u
         if board.over_yd(p[0], p[1]):
             p[2] = max(p[2], board.surface_yd(p[0]) + BAG_T / 2 * board.s / YD)
         out.append([round(p[0], 4), round(p[1], 4), round(p[2], 4)])
@@ -398,6 +402,15 @@ def _collide(board, bags):
             b.p = [b.p[0] + push * nx, b.p[1] + push * nc]
 
 
+def bag_spin(shot):
+    """How fast the bag spins flat (rad/s, + is clockwise seen from above, like a fade), from the
+    ball's side spin only. Backspin and topspin don't show: the bag never tumbles in the air."""
+    side_rpm = shot.get("spin_rpm", 0.0) * math.sin(math.radians(shot.get("spin_axis_deg", 0.0)))
+    w = side_rpm * BAG_SPIN_PER_RPM
+    w = math.copysign(min(abs(w), BAG_SPIN_MAX), w)
+    return 0.0 if abs(w) < 0.3 else w
+
+
 def throw(board, bags, shot, side, player, seed=0, frames=True):
     """Throw one bag (the shot's ball flight) onto a board that already has `bags` on it.
 
@@ -409,9 +422,9 @@ def throw(board, bags, shot, side, player, seed=0, frames=True):
     for b in bags:
         b.how = None if b.state == "board" else b.how
     before = [b.state for b in bags]
-    h = (seed * 2654435761) & 0xFFFFFFFF   # a little yaw and spin, the same every time for the same shot
+    h = (seed * 2654435761) & 0xFFFFFFFF   # which way the bag faces, the same every time for the same shot
     new = Bag(side, player, len(bags), yaw=(h % 360) * math.pi / 180)
-    new.spin = (1 if h & 1 else -1) * (3 + (h >> 8) % 5)
+    new.spin = bag_spin(shot)
     everyone = bags + [new]
     out = []
     flight = shot["flight"]
