@@ -132,7 +132,8 @@ class SessionTests(unittest.TestCase):
                 ev = s.apply_shot({"id": next(_ids), "speed_mph": 90.0, "vla_deg": 20.0, "hla_deg": 0.0,
                                    "spin_rpm": 5000.0, "spin_axis_deg": 0.0, "flight": f})
                 json.dumps(ev)
-            self.assertTrue(s.snapshot()["over"] or g.id == "tictactoe", g.id)
+            # tic-tac-toe and cornhole (to 21) run on until someone wins
+            self.assertTrue(s.snapshot()["over"] or g.id in ("tictactoe", "cornhole"), g.id)
 
 
 class ApiTests(unittest.TestCase):

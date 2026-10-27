@@ -75,6 +75,7 @@ class RangeGL {
     this.buildTracer();
     this.buildParticles();
     this.buildMarkers();
+    this.cornhole = null;   // Golf Cornhole's board and bags, built when a cornhole game shows
 
     if (this.high) {
       this.composer = new EffectComposer(r);
@@ -391,6 +392,77 @@ class RangeGL {
     }
   }
 
+  /* Golf Cornhole: the board (positions from the server, in yards) and a pool of bags. */
+  setCornhole(info) {
+    const key = JSON.stringify(info);
+    if (this.cornhole && this.cornhole.key === key) return;
+    if (this.cornhole) this.scene.remove(this.cornhole.group);
+    const group = new THREE.Group();
+    const slope = info.slope_deg * Math.PI / 180;
+    const n = new THREE.Vector3(0, Math.cos(slope), Math.sin(slope));  // the top's normal
+    const top = toV(info.center);
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8 });
+    const paint = new THREE.MeshStandardMaterial({ color: 0x1d4f91, roughness: 0.55 });
+    const box = (w, h, d, mat, center) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.rotation.x = slope;
+      m.position.copy(center);
+      m.castShadow = m.receiveShadow = true;
+      group.add(m);
+      return m;
+    };
+    // the 2x4 frame, then the painted top a little inside it
+    box(info.width, info.frame, info.length, wood, top.clone().addScaledVector(n, -info.frame / 2 - 0.002 * info.length));
+    box(info.width * 0.94, info.bag_t * 0.3, info.length * 0.97, paint, top.clone().addScaledVector(n, -info.bag_t * 0.15));
+    const stripe = box(info.width * 0.94, info.bag_t * 0.31, info.length * 0.05,
+      new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }),
+      top.clone().add(new THREE.Vector3(0, Math.sin(slope), -Math.cos(slope)).multiplyScalar(info.length * 0.3))
+        .addScaledVector(n, -info.bag_t * 0.15));
+    stripe.castShadow = false;
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(info.hole_r, 48), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+    hole.rotation.x = -Math.PI / 2 + slope;
+    hole.position.copy(toV(info.hole)).addScaledVector(n, 0.002 * info.length + info.bag_t * 0.02);
+    group.add(hole);
+    // back legs
+    const legH = info.back[2] - 1.5 * info.frame;  // up to the underside of the frame
+    [-1, 1].forEach((side) => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(info.frame * 0.8, legH, info.frame * 0.8), wood);
+      leg.position.set(side * info.width * 0.42, legH / 2, -(info.back[0] - 1.5 * info.frame));
+      leg.castShadow = true;
+      group.add(leg);
+    });
+    const bags = [];
+    const bagGeo = new THREE.BoxGeometry(info.bag, info.bag_t, info.bag);
+    for (let i = 0; i < 12; i++) {
+      const m = new THREE.Mesh(bagGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }));
+      m.castShadow = m.receiveShadow = true;
+      m.visible = false;
+      m.rotation.order = "XYZ";
+      group.add(m);
+      bags.push(m);
+    }
+    this.scene.add(group);
+    this.cornhole = { key, group, bags };
+  }
+
+  showCornhole(c) {
+    const on = !!c;
+    if (on) this.setCornhole(c.board);
+    if (this.cornhole) this.cornhole.group.visible = on;
+    this.targetObjs.forEach((o) => { o.grp.visible = !on; });
+    if (!on) return;
+    this.cornhole.bags.forEach((m, i) => {
+      const b = c.bags[i];
+      m.visible = !!(b && b.pose[5]);
+      if (!m.visible) return;
+      const p = b.pose;
+      m.position.copy(toV(p));
+      m.rotation.set(p[4] * Math.PI / 180, -p[3] * Math.PI / 180, 0);
+      m.scale.setScalar(p[6] || 1);
+      m.material.color.set(b.color);
+    });
+  }
+
   /* ---------------- per frame ---------------- */
 
   resize(w, h) {
@@ -411,11 +483,13 @@ class RangeGL {
     const dt = clamp((now - (this.lastNow || now)) / 1000, 0, 0.1);
     this.lastNow = now;
     const plan = frame.plan;
+    const ch = frame.cornhole;
+    this.showCornhole(ch);
 
     if (frame.shotId !== this.shotId) {
       this.shotId = frame.shotId;
       this.cupDone = false;
-      if (frame.shot) this.setTracer(frame.shot, frame.color);
+      if (frame.shot && !ch) this.setTracer(frame.shot, frame.color);
       else this.tracer.geometry.setDrawRange(0, 0);
     }
 
@@ -425,7 +499,7 @@ class RangeGL {
       const b = plan.ball(frame.wall);
       ballPos = b.pos; ballVisible = b.visible;
       const prog = plan.tracerProgress(frame.wall);
-      this.tracer.geometry.setDrawRange(0, Math.floor(prog * TRACER_SEGMENTS) * TRACER_RADIAL * 6);
+      this.tracer.geometry.setDrawRange(0, ch ? 0 : Math.floor(prog * TRACER_SEGMENTS) * TRACER_RADIAL * 6);
       if (b.phase === "cup" && !this.cupDone) {
         this.cupDone = true;
         const cupAt = toV(b.pos);
@@ -444,10 +518,13 @@ class RangeGL {
       this.camera.position.copy(toV(cam.pos));
       this.look.copy(toV(cam.look));
     } else {
-      cam = { pos: this.idleCamera.pos.slice(), look: this.idleCamera.look.slice(), fov: this.idleCamera.fov };
-      cam.pos[1] += Math.sin(now / 9000) * 3;
-      cam.pos[2] += Math.sin(now / 7000) * 1.2;
-      const key = "idle";
+      const idle = ch ? ch.idleCamera : this.idleCamera;
+      cam = { pos: idle.pos.slice(), look: idle.look.slice(), fov: idle.fov };
+      if (!ch) {  // the golfer's cornhole view stays still: it is life-size on the screen
+        cam.pos[1] += Math.sin(now / 9000) * 3;
+        cam.pos[2] += Math.sin(now / 7000) * 1.2;
+      }
+      const key = ch ? "idle-cornhole" : "idle";
       const want = toV(cam.pos);
       if (this.camKey !== key) { this.camera.position.copy(want); this.look.copy(toV(cam.look)); }
       else this.camera.position.lerp(want, 1 - Math.exp(-2 * dt));
@@ -460,7 +537,7 @@ class RangeGL {
     const bp = toV(ballPos);
     const camDist = this.camera.position.distanceTo(bp);
     const rad = clamp(camDist * 0.0045, 0.03, 0.6);
-    this.ball.visible = this.blob.visible = ballVisible;
+    this.ball.visible = this.blob.visible = ballVisible && !ch;  // in cornhole the bags are the ball
     this.ball.scale.setScalar(rad);
     this.ball.position.set(bp.x, Math.max(bp.y, 0) + rad, bp.z);
     this.blob.position.set(bp.x, 0.03, bp.z);

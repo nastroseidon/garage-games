@@ -15,6 +15,9 @@ import math
 import random
 from decimal import ROUND_HALF_UP, Decimal
 
+import cornhole
+import flight
+
 JUNIOR = 0.5  # juniors' targets are this fraction of the adult distance
 
 
@@ -128,6 +131,40 @@ class Game:
     # Tic-Tac-Toe replaces the per-player scoreboard with a per-team one.
     scoreboard = None
     winner_text = None
+    # Extra setup choices: [{key, label, choices, default, unit}] (Golf Cornhole's board distance).
+    options = None
+
+    def check_options(self, given):
+        """The chosen options, each one of its choices (or the default)."""
+        out = {}
+        for o in self.options or []:
+            v = (given or {}).get(o["key"], o["default"])
+            try:
+                v = type(o["default"])(v)
+            except (TypeError, ValueError):
+                raise ValueError("bad %s: %r" % (o["label"].lower(), v))
+            if v not in o["choices"]:
+                raise ValueError("%s must be one of %s" % (o["label"], ", ".join(map(str, o["choices"]))))
+            out[o["key"]] = v
+        return out
+
+    def on_skip(self, ctx):
+        """A skipped turn (stateful games count it too)."""
+
+    def round_info(self, ctx):
+        return None
+
+    def player_totals(self, ctx):
+        """Per-player scores when they aren't the sum of shot points (None: they are)."""
+        return None
+
+    def extra(self, ctx):
+        """Game-specific state for the screens (None: nothing)."""
+        return None
+
+    def test_shot(self, t, ctx, idx):
+        """Launch numbers for a test shot ({} lets the server pick by test_kind)."""
+        return {}
 
     def info(self):
         """What a menu needs to list the game."""
@@ -135,7 +172,8 @@ class Game:
                 "blurb": self.blurb, "view": self.view,
                 "min_players": self.min_players, "uses_rounds": self.uses_rounds,
                 "round_choices": self.round_choices,
-                "default_rounds": self.default_rounds}
+                "default_rounds": self.default_rounds,
+                "options": self.options}
 
 
 # ---------------- Closest to the Pin ----------------
@@ -648,7 +686,217 @@ class Ladder(RangeGame):
         return ctx.turn >= ctx.rounds * len(ctx.players)
 
 
-GAME_CLASSES = [TargetRange, CalledShot, Ladder, Closest, Darts, Speed, LongDrive, TicTacToe]
+# ================= Golf Cornhole =================
+# The physics (bag flight, the board, collisions) is in cornhole.py. These are
+# the official (ACL) rules: two sides, 4 bags each per inning, alternating;
+# in the hole 3, on the board 1; only the difference scores (cancellation);
+# first to 21 at the end of an inning wins; whoever scored last throws first.
+
+BAGS_PER_SIDE = 4
+MISS_TEXT = {"short": "Short of the board", "long": "Over the board", "wide": "Wide of the board",
+             "face": "Hit the front of the board", "off_front": "Slid off the front",
+             "off_back": "Slid off the back", "off_side": "Slid off the side"}
+
+
+class Cornhole(Game):
+    id = "cornhole"
+    name = "Golf Cornhole"
+    emoji = "🌽"
+    blurb = "Your shot becomes a bean bag on a giant board. Hole 3, board 1, cancellation scoring."
+    view = "cornhole"
+    min_players = 2
+    uses_rounds = False
+    stateful = True
+    options = [{"key": "distance", "label": "Hole distance", "choices": [30, 50, 75, 100, 150, 200, 250],
+                "default": 100, "unit": "yds"},
+               {"key": "to", "label": "Play to", "choices": [21, 11], "default": 21, "unit": ""}]
+
+    def reset(self, ctx):
+        opts = ctx.options or self.check_options({})
+        ctx.cornhole = {"board": cornhole.Board(opts["distance"]), "to": opts["to"], "scores": [0, 0],
+                        "inning": 1, "first": 0, "thrown": 0, "bags": [], "clear": False,
+                        "innings": [], "winner": None, "last": None}
+
+    # ---- sides ----
+    def side_of(self, idx):
+        return idx % 2
+
+    def members(self, ctx, side):
+        return [i for i in range(len(ctx.players)) if i % 2 == side]
+
+    def sides(self, ctx):
+        out = []
+        for s in (0, 1):
+            ps = [ctx.players[i] for i in self.members(ctx, s)]
+            out.append({"name": " & ".join(p["name"] for p in ps), "color": ps[0]["color"],
+                        "players": [p["name"] for p in ps]})
+        return out
+
+    def side_up(self, ctx):
+        st = ctx.cornhole
+        return st["first"] if st["thrown"] % 2 == 0 else 1 - st["first"]
+
+    def player_for_turn(self, ctx, turn):
+        side = self.side_up(ctx)
+        team = self.members(ctx, side)
+        return team[(ctx.cornhole["inning"] - 1) % len(team)]
+
+    def make_target(self, round_):
+        return {}
+
+    def player_target(self, base, p):
+        return base
+
+    def bag_number(self, ctx):
+        return ctx.cornhole["thrown"] // 2 + 1
+
+    def task(self, t, p, ctx, idx):
+        st = ctx.cornhole
+        return "Bag %d of %d · hole at %s yds" % (self.bag_number(ctx), BAGS_PER_SIDE,
+                                                  num(st["board"].distance_yd))
+
+    def test_kind(self, t, ctx, idx):
+        return kind_for(ctx.cornhole["board"].distance_yd)
+
+    def test_shot(self, t, ctx, idx):
+        """A shot aimed at the hole, with a golfer's usual misses."""
+        d = ctx.cornhole["board"].distance_yd
+        vla, spin = {"chip": (28, 4500), "wedge": (28, 8500), "iron": (18, 6500), "driver": (12, 3000)}[kind_for(d)]
+        lo, hi = 5.0, 200.0
+        for _ in range(30):
+            mid = (lo + hi) / 2
+            if flight.simulate(mid, vla, 0, spin, 0)["carry_yd"] < d:
+                lo = mid
+            else:
+                hi = mid
+        rng = self.rng
+        return {"speed_mph": lo * rng.uniform(0.95, 1.04), "vla_deg": vla + rng.uniform(-2, 2),
+                "hla_deg": rng.uniform(-3, 3), "spin_rpm": spin * rng.uniform(0.9, 1.1),
+                "spin_axis_deg": rng.uniform(-6, 6)}
+
+    # ---- a throw ----
+    def score(self, shot, t, p, ctx, idx):
+        st = ctx.cornhole
+        if st["clear"]:
+            st["bags"], st["clear"] = [], False
+        side = self.side_of(idx)
+        # undo replays the earlier throws; they don't need animation frames
+        sim = cornhole.throw(st["board"], st["bags"], shot, side, idx, seed=shot.get("id") or 0,
+                             frames=not getattr(ctx, "replaying", False))
+        st["bags"], st["last"] = sim["bags"], sim
+        st["thrown"] += 1
+        bag = sim["thrown"]
+        names = self.sides(ctx)
+        if bag.state == "hole":
+            what = "AIRMAIL!  +3" if bag.how == "airmail" else "IN THE HOLE!  +3"
+        elif bag.state == "board":
+            what = "On the board  +1"
+        else:
+            what = MISS_TEXT.get(bag.how, "Off the board")
+        effects = []
+        for b, was in zip(sim["bags"], sim["before"]):
+            if was == "board" and b.state == "hole":
+                effects.append("knocked %s bag in" % ("their own" if b.side == side else names[b.side]["name"] + "'s"))
+            elif was == "board" and b.state != "board":
+                effects.append("knocked %s bag off" % ("their own" if b.side == side else names[b.side]["name"] + "'s"))
+        detail = (", ".join(effects).capitalize()) if effects else ""
+        res = {"points": 0, "what": what, "detail": detail, "great": bag.state == "hole",
+               "color": names[side]["color"]}
+        summary = self._advance(ctx)
+        if summary:
+            res["detail"] = (detail + " · " if detail else "") + summary
+            res["inning_over"] = True
+        return res
+
+    def on_skip(self, ctx):
+        st = ctx.cornhole
+        if st["clear"]:
+            st["bags"], st["clear"] = [], False
+        st["thrown"] += 1
+        st["last"] = None
+        self._advance(ctx)
+
+    def _advance(self, ctx):
+        """End the inning after the 8th bag: cancellation scoring. Returns the inning's summary."""
+        st = ctx.cornhole
+        if st["thrown"] < 2 * BAGS_PER_SIDE:
+            return None
+        pts = [0, 0]
+        for b in st["bags"]:
+            pts[b.side] += b.points
+        diff = abs(pts[0] - pts[1])
+        scorer = None if diff == 0 else 0 if pts[0] > pts[1] else 1
+        if scorer is not None:
+            st["scores"][scorer] += diff
+        st["innings"].append({"inning": st["inning"], "points": pts, "scorer": scorer, "diff": diff})
+        names = self.sides(ctx)
+        text = "Inning %d: %d-%d, " % (st["inning"], pts[0], pts[1])
+        text += "cancels out" if scorer is None else "%s +%d" % (names[scorer]["name"], diff)
+        if scorer is not None and st["scores"][scorer] >= st["to"]:
+            st["winner"] = scorer
+        else:
+            st["inning"] += 1
+            st["thrown"] = 0
+            st["clear"] = True
+            if scorer is not None:
+                st["first"] = scorer
+        return text
+
+    def is_over(self, ctx):
+        return ctx.cornhole["winner"] is not None
+
+    # ---- screens ----
+    def round_info(self, ctx):
+        st = ctx.cornhole
+        return "INNING %d · TO %d" % (st["inning"], st["to"])
+
+    def player_totals(self, ctx):
+        st = ctx.cornhole
+        return [st["scores"][self.side_of(i)] for i in range(len(ctx.players))]
+
+    def scoreboard(self, ctx, current):
+        st = ctx.cornhole
+        rows = []
+        thrown = [0, 0] if st["clear"] else [sum(1 for b in st["bags"] if b.side == s) for s in (0, 1)]
+        for s, side in enumerate(self.sides(ctx)):
+            left = BAGS_PER_SIDE - thrown[s] if not st["clear"] else BAGS_PER_SIDE
+            on = sum(b.points for b in st["bags"] if b.side == s) if not st["clear"] else 0
+            rows.append({"name": side["name"], "color": side["color"],
+                         "sub": "%d bag%s left · %d this inning" % (left, "" if left == 1 else "s", on),
+                         "value": str(st["scores"][s]),
+                         "current": current >= 0 and self.side_of(current) == s})
+        return rows
+
+    def winner_text(self, ctx):
+        st = ctx.cornhole
+        w = st["winner"]
+        side = self.sides(ctx)[w]
+        verb = "win" if len(side["players"]) > 1 else "wins"
+        return "%s %s %d-%d!" % (side["name"], verb, st["scores"][w], st["scores"][1 - w])
+
+    def extra(self, ctx):
+        st = ctx.cornhole
+        board = st["board"]
+        sides = self.sides(ctx)
+        bags = [] if st["clear"] else st["bags"]
+        return {"board": board.info(), "idle_camera": cornhole.idle_camera(board),
+                "bags": [{"side": b.side, "player": b.player, "color": sides[b.side]["color"],
+                          "state": b.state, "pose": b.pose(board)} for b in bags],
+                "scores": st["scores"], "inning": st["inning"], "thrown": st["thrown"], "to": st["to"],
+                "sides": sides, "innings": st["innings"]}
+
+    def plan(self, ctx, shot, result, player, style):
+        """The shot plan for the throw score() just played."""
+        st = ctx.cornhole
+        sim = st["last"]
+        great = result.get("great") or result.get("inning_over") or st["winner"] is not None
+        mode = ("static" if style == "static" else "quick" if style == "quick" else
+                "broadcast" if style == "broadcast" or great else "quick")
+        return cornhole.message(st["board"], sim, shot, result, player,
+                                [s["color"] for s in self.sides(ctx)], mode)
+
+
+GAME_CLASSES = [TargetRange, CalledShot, Ladder, Closest, Darts, Speed, LongDrive, TicTacToe, Cornhole]
 
 
 def make_games(rng=None):

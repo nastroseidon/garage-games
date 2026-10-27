@@ -197,6 +197,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not opts.get("kind"):
                     with _shot_lock:
                         opts["kind"] = session.test_kind()
+                        for k, v in session.test_shot().items():
+                            opts.setdefault(k, v)
                 shot = random_test_shot(opts)
             except (ValueError, TypeError) as exc:
                 return self._json(400, {"error": str(exc)})
@@ -204,7 +206,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         actions = {
             "/api/game/start": lambda: session.start(opts.get("game"), opts.get("players"),
-                                                     opts.get("rounds"), opts.get("camera")),
+                                                     opts.get("rounds"), opts.get("camera"),
+                                                     opts.get("options")),
             "/api/game/undo": session.undo,
             "/api/game/skip": session.skip,
             "/api/game/end": session.end,
