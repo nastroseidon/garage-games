@@ -1,0 +1,41 @@
+# Git LFS: big binary files are stored in Git LFS, and the repo only keeps a
+# small pointer to each one. Needs Git LFS installed (`git lfs install` once
+# per PC).
+
+# ---- Unreal Engine assets (anywhere in the repo) ----
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.ubulk filter=lfs diff=lfs merge=lfs -text
+*.uexp filter=lfs diff=lfs merge=lfs -text
+*.upk filter=lfs diff=lfs merge=lfs -text
+*.udk filter=lfs diff=lfs merge=lfs -text
+*.utxt filter=lfs diff=lfs merge=lfs -text
+
+# ---- Source art, audio and video for the Unreal project ----
+# Only inside unreal/, so the small web images and icons stay ordinary files.
+unreal/**/*.fbx filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.obj filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.glb filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.gltf filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.blend filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.png filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.tga filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.tif filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.tiff filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.exr filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.hdr filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.psd filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.wav filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.ogg filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.mov filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.ttf filter=lfs diff=lfs merge=lfs -text
+unreal/**/*.otf filter=lfs diff=lfs merge=lfs -text
+
+# ---- Unreal text files stay plain text (readable diffs) ----
+*.uproject text
+*.uplugin text
+*.ini text
