@@ -6,8 +6,9 @@ shot camera (GG_ShotCamera) along the shot plan, one editor frame at a time,
 and looks through that camera in the level viewport.
 
 During a Golf Cornhole game it also puts the server's board and bags in the
-level (actors named GG_CH_..., removed when the game ends) and hides the
-range targets.
+level, with the campsite in the woods around it at night (garage_camp.py).
+Those actors are named GG_CH_... and removed when the game ends; the range
+is hidden meanwhile and its lighting put back afterwards.
 
 Started automatically by init_unreal.py when the project opens. From the
 editor's Python console:
@@ -22,6 +23,7 @@ import time
 
 import unreal
 
+import garage_camp
 import garage_env
 import garage_stream as gs
 
@@ -62,9 +64,11 @@ def _hide(actor, hidden):
 
 
 def _range_dressing(label):
-    """Targets, yardage markers and the light towers' poles and lamps: hidden for Golf Cornhole.
-    The towers' spot lights stay on so the field stays lit."""
-    if label.startswith(("GG_Target_", "GG_Marker_")):
+    """The driving range: hidden for Golf Cornhole, which has its own ground and woods.
+    The towers' spot lights are turned off with the camp's night instead (garage_camp)."""
+    if label.startswith(("GG_Target_", "GG_Marker_", "GG_Stripe_", "GG_Tree_", "GG_Rock_", "GG_Hill_")):
+        return True
+    if label in ("GG_Rough", "GG_TeeBox", "GG_HittingMat"):
         return True
     return label.startswith("GG_Tower_") and label.endswith(("_Pole", "_Lamp"))
 
@@ -76,6 +80,7 @@ class CornholeSet:
         self.key = None
         self.bags = []      # (actor, dynamic material)
         self.bag_size = (0.0, 0.0)
+        self.camp = None
 
     def _spawn(self, label, shape, color):
         a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
@@ -153,6 +158,10 @@ class CornholeSet:
             self._place(leg, [board["back"][0] - 1.5 * fr, side * W * 0.42, h / 2], [fr * 0.8, fr * 0.8, h])
         if board.get("sign"):
             self._sign(board["sign"])
+        if board.get("camp"):
+            self.camp = garage_camp.Camp(board["camp"])
+            self.camp.build()
+            self.camp.night()
         self.bag_size = (board["bag"], board["bag_t"])
         # all 8 bags up front: spawning them mid-throw stalls a frame
         while len(self.bags) < 8:
@@ -180,7 +189,14 @@ class CornholeSet:
             mid.set_vector_parameter_value("Color", garage_env.hex_color(color))
             _hide(actor, False)
 
+    def tick(self, dt):
+        if self.camp:
+            self.camp.tick(dt)
+
     def clear(self):
+        if self.camp:
+            self.camp.restore()
+            self.camp = None
         for a in _actors().get_all_level_actors():
             label = a.get_actor_label()
             if label.startswith(CH):
@@ -232,6 +248,7 @@ class Bridge:
                         self.play(ev)
                 elif name == "state":
                     self.on_state(json.loads(data))
+            self.cornhole.tick(dt)
             if self.player:
                 self.stats.add(dt)
                 self._apply(time.perf_counter() - self.start_time)
