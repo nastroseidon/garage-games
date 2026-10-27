@@ -87,6 +87,13 @@ class LandingTests(unittest.TestCase):
         r = throw_on(b, [], shot(104, 0, roll=30))
         self.assertEqual(r["thrown"].how, "off_back")
         self.assertEqual(r["thrown"].state, "ground")
+        self.assertGreater(r["thrown"].p[0], b.x1)   # on the grass behind the board, not under it
+
+    def test_a_bag_knocked_off_the_side_lands_beside_the_board(self):
+        b = C.Board(100)
+        r = throw_on(b, [], shot(88, 8, roll=4, roll_l=14))    # lands right of centre, rolls further right
+        self.assertEqual(r["thrown"].how, "off_side")
+        self.assertGreater(abs(r["thrown"].p[1]), b.W / 2)
 
     def test_a_bag_can_knock_another_into_the_hole(self):
         b = C.Board(100)
