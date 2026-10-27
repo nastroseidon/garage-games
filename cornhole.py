@@ -149,16 +149,30 @@ def yardage_sign(board):
     import random
     rnd = random.Random(int(board.distance_yd))
     ln = board.L * board.s / YD                     # the board's length in yards
-    hx = board.distance_yd
+    hole = board.to_range(board.on_top(board.hole_a, 0))
+    hx, hz = hole[0], hole[2]
     hw = board.W * board.s / YD / 2
-    base = [round(hx * 0.62, 3), round(-(hw + 1.15 * hw), 3), 0.0]
-    heading = math.atan2(-base[1], -base[0]) + math.radians(rnd.uniform(4, 9))   # turned toward the tee
-    nvec = [math.cos(heading), math.sin(heading), 0.0]
+    w, h, post_h = 0.34 * ln, 0.13 * ln, 0.16 * ln
+    # placed on the tee view: the plank's centre level with the hole on screen, halfway between
+    # the board's left edge and the screen's left edge. The hole is in the middle of the view.
+    cz = hz + hx * tee_drop()
+    dist = math.hypot(hx, cz - hz)
+    f = [hx / dist, 0.0, (hz - cz) / dist]              # straight at the hole; right is +y
+    tan_w = SCREEN_W_FT / 2 / HITTER_FT                 # half the screen's width over the distance
+    sx = (-hw / dist / tan_w - 1) / 2                   # -1 is the screen's left edge
+    ray = [f[0], sx * tan_w, f[2]]
+    turn = math.radians(rnd.uniform(4, 9))
     lean = math.radians(rnd.choice((-1, 1)) * rnd.uniform(4, 7))
+    up = post_h + h / 2                             # foot of the post to the plank's centre
+    t = (up * math.cos(lean) - cz) / ray[2]         # down the ray to the plank's centre height
+    mid = [t * ray[0], t * ray[1]]
+    heading = math.atan2(-mid[1], -mid[0]) + turn   # turned toward the tee
+    nvec = [math.cos(heading), math.sin(heading), 0.0]
     r = [nvec[1], -nvec[0], 0.0]                    # the viewer's right
     u = [r[0] * math.cos(lean), r[1] * math.cos(lean), -math.sin(lean)]
     v = [r[0] * math.sin(lean), r[1] * math.sin(lean), math.cos(lean)]
-    w, h = 0.34 * ln, 0.13 * ln
+    # the lean carries the plank sideways, so the post's foot goes the other way
+    base = [round(mid[0] - v[0] * up, 3), round(mid[1] - v[1] * up, 3), 0.0]
     text = str(int(board.distance_yd))
     th = 0.66 * h                                   # letter height
     gap = 0.16 * th
@@ -178,7 +192,7 @@ def yardage_sign(board):
         x += 0.6 * th + gap
     return {"text": text, "base": base, "u": [round(c, 5) for c in u], "v": [round(c, 5) for c in v],
             "n": [round(c, 5) for c in nvec], "w": round(w, 4), "h": round(h, 4), "t": round(0.02 * ln, 4),
-            "post_h": round(0.16 * ln, 4), "post_w": round(0.035 * ln, 4), "strokes": strokes}
+            "post_h": round(post_h, 4), "post_w": round(0.035 * ln, 4), "strokes": strokes}
 
 
 class Bag:

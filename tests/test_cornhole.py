@@ -49,6 +49,23 @@ class BoardTests(unittest.TestCase):
             # the hole's centre is 9 in from the back: 3 hole radii
             self.assertAlmostEqual(i["back"][0] - i["hole"][0], 3 * hole * C.math.cos(C.SLOPE), delta=0.01 * d)
 
+    @staticmethod
+    def on_tee_screen(board, p):
+        """Where a range point shows on the 12 x 9 ft screen from the tee camera:
+        x and y run -1 to 1 from the left and bottom edges to the right and top."""
+        cam = C.cameras(board)["tee"]
+        c, t = cam["pos"], cam["look"]
+        f = [t[k] - c[k] for k in range(3)]
+        n = C.math.sqrt(sum(a * a for a in f))
+        f = [a / n for a in f]
+        right = [0.0, 1.0, 0.0]
+        up = [-f[2] * f[0], 0.0, f[0] * f[0]]   # f x right, for a camera with no roll
+        d = [p[k] - c[k] for k in range(3)]
+        depth = sum(d[k] * f[k] for k in range(3))
+        tan_h = C.math.tan(C.math.radians(cam["fov"] / 2))
+        return (sum(d[k] * right[k] for k in range(3)) / depth / (tan_h * C.SCREEN_W_FT / C.SCREEN_H_FT),
+                sum(d[k] * up[k] for k in range(3)) / depth / tan_h)
+
     def test_the_yardage_sign_stands_clear_of_the_board(self):
         for d in (30, 100, 250):
             b = C.Board(d)
@@ -56,9 +73,17 @@ class BoardTests(unittest.TestCase):
             sg = i["sign"]
             self.assertEqual(sg["text"], str(d))
             self.assertTrue(sg["strokes"])
-            # left of the board's edge, beside its front, facing back toward the tee
+            # left of the board's edge, facing back toward the tee
             self.assertLess(sg["base"][1] + sg["w"] / 2, -i["width"] / 2)
-            self.assertLess(sg["base"][0], i["front"][0] + 0.1 * i["length"])
+            # on the tee view: the plank's centre is level with the hole, halfway between the
+            # board's left edge and the screen's left edge
+            mid = [sg["base"][k] + sg["v"][k] * (sg["post_h"] + sg["h"] / 2) for k in range(3)]
+            hole_x, hole_y = self.on_tee_screen(b, i["hole"])
+            edge_x, _ = self.on_tee_screen(b, [i["hole"][0], -i["width"] / 2, i["hole"][2]])
+            x, y = self.on_tee_screen(b, mid)
+            self.assertAlmostEqual(hole_x, 0, places=3)
+            self.assertAlmostEqual(y, hole_y, delta=0.02)
+            self.assertAlmostEqual(x, (edge_x - 1) / 2, delta=0.02)
             self.assertLess(sg["n"][0], 0)
             lean = C.math.degrees(C.math.asin(abs(sg["u"][2])))
             self.assertTrue(3 < lean < 10, lean)
