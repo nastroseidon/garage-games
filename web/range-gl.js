@@ -98,14 +98,18 @@ class RangeGL {
         uniforms: {
           top: { value: new THREE.Color(0x050916) },
           mid: { value: new THREE.Color(0x1a2352) },
-          low: { value: new THREE.Color(0x4b3b72) }
+          low: { value: new THREE.Color(0x4b3b72) },
+          glowDir: { value: new THREE.Vector3(0, 0, -1) },   // a sunset's glow low in the sky (off on the range)
+          glow: { value: new THREE.Color(0x000000) }
         },
         vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-        fragmentShader: "uniform vec3 top; uniform vec3 mid; uniform vec3 low; varying vec3 vDir;" +
-          "void main(){ float h = vDir.y; vec3 c = mix(low, mid, smoothstep(-0.02, 0.18, h)); c = mix(c, top, smoothstep(0.18, 0.7, h)); gl_FragColor = vec4(c,1.0); }"
+        fragmentShader: "uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 glowDir; uniform vec3 glow; varying vec3 vDir;" +
+          "void main(){ float h = vDir.y; vec3 c = mix(low, mid, smoothstep(-0.02, 0.18, h)); c = mix(c, top, smoothstep(0.18, 0.7, h));" +
+          " c += glow * pow(max(dot(vDir, glowDir), 0.0), 3.0) * (1.0 - smoothstep(0.0, 0.9, h)); gl_FragColor = vec4(c,1.0); }"
       })
     );
     sky.renderOrder = -2;
+    this.sky = sky;
     this.skyGroup = new THREE.Group();   // the sky and stars: pushed out past the woods for Golf Cornhole
     this.skyGroup.add(sky);
     this.scene.add(this.skyGroup);
@@ -117,7 +121,8 @@ class RangeGL {
     }
     const sg = new THREE.BufferGeometry();
     sg.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
-    this.skyGroup.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })));
+    this.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 }));
+    this.skyGroup.add(this.stars);
 
     // tree line silhouette all around the horizon
     const trees = canvasTexture(1024, 128, (g, w, h) => {
@@ -472,25 +477,37 @@ class RangeGL {
     this.cornhole = { key, info, group, bags, camp };
   }
 
-  /* The campsite's night: fog, sky, moonlight and the camera's range, all at the board's scale
-     (k yards per real metre); null puts the driving range back. */
+  /* The campsite's early evening: fog, a twilight sky, a low sun and the camera's range, all at the
+     board's scale (k yards per real metre); null puts the driving range back. The sun is low behind
+     the woods, downrange and to the left (as in the Unreal camp, garage_camp.DUSK). */
   campMode(k) {
     if (this.campK === k) return;
+    const u = this.sky.material.uniforms;
     if (!this.rangeLook) {
       this.rangeLook = { fog: this.scene.fog.color.getHex(), density: this.scene.fog.density, near: this.camera.near, far: this.camera.far,
         hemi: [this.hemi.color.getHex(), this.hemi.groundColor.getHex(), this.hemi.intensity],
-        key: [this.key.color.getHex(), this.key.intensity, this.key.castShadow] };
+        key: [this.key.color.getHex(), this.key.intensity, this.key.castShadow],
+        keyAt: [this.key.position.clone(), this.key.target.position.clone()],
+        sky: [u.top.value.getHex(), u.mid.value.getHex(), u.low.value.getHex(), u.glow.value.getHex()],
+        stars: this.stars.material.opacity };
     }
     const r = this.rangeLook;
     this.campK = k;
     if (k) {
-      this.scene.fog.color.set(0x070b14);
-      this.scene.fog.density = 0.035 / k;
+      this.scene.fog.color.set(0x2a3048);
+      this.scene.fog.density = 0.03 / k;
       this.camera.near = 0.01 * k;
       this.camera.far = 220 * k;
       this.skyGroup.scale.setScalar(Math.max(1, 115 * k / 1800));
-      this.hemi.color.set(0x5466a8); this.hemi.groundColor.set(0x2a1d10); this.hemi.intensity = 0.42;
-      this.key.color.set(0x9fb4ff); this.key.intensity = 0.5; this.key.castShadow = false;
+      u.top.value.set(0x24366a); u.mid.value.set(0xb07a9a); u.low.value.set(0xf08a5a); u.glow.value.set(0xff8a4a);
+      this.stars.material.opacity = 0.2;
+      const sun = toV([Math.cos(0.5236), -Math.sin(0.5236), 0.05]).normalize();   // 30 degrees left of downrange, 3 up
+      u.glowDir.value.copy(sun);
+      this.hemi.color.set(0x9aa8e0); this.hemi.groundColor.set(0x3a2a1a); this.hemi.intensity = 1.1;
+      const centre = toV(this.cornhole.info.camp.center);
+      this.key.target.position.copy(centre);
+      this.key.position.copy(centre).addScaledVector(sun, 100 * k);
+      this.key.color.set(0xffa064); this.key.intensity = 1.6; this.key.castShadow = false;
     } else {
       this.scene.fog.color.set(r.fog);
       this.scene.fog.density = r.density;
@@ -499,7 +516,11 @@ class RangeGL {
       this.skyGroup.scale.setScalar(1);
       this.hemi.color.set(r.hemi[0]); this.hemi.groundColor.set(r.hemi[1]); this.hemi.intensity = r.hemi[2];
       this.key.color.set(r.key[0]); this.key.intensity = r.key[1]; this.key.castShadow = r.key[2];
+      this.key.position.copy(r.keyAt[0]); this.key.target.position.copy(r.keyAt[1]);
+      u.top.value.set(r.sky[0]); u.mid.value.set(r.sky[1]); u.low.value.set(r.sky[2]); u.glow.value.set(r.sky[3]);
+      this.stars.material.opacity = r.stars;
     }
+    this.key.target.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
   }
 

@@ -135,6 +135,12 @@ bushes, string lights, hooks and flames are always shapes. The firs cast no
 shadows and fade out past 40 real metres, which keeps a shot near 80 fps
 on an RTX 3080 (about 45 fps otherwise).
 
+The camp's early-evening light (a low sun behind the woods, a twilight sky,
+sky light, exposure and haze) is `DUSK` in the same file. It is set when a
+Golf Cornhole game starts and the level's own lighting, including the sun's
+angle, comes back when another game is picked. To make it lighter or darker,
+change `exposure` and `sky` there first.
+
 ## Check it runs smoothly (with the VTrack software running)
 
 After every shot the Output Log prints a line like:

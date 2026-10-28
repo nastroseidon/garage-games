@@ -6,7 +6,7 @@ shot camera (GG_ShotCamera) along the shot plan, one editor frame at a time,
 and looks through that camera in the level viewport.
 
 During a Golf Cornhole game it also puts the server's board and bags in the
-level, with the campsite in the woods around it at night (garage_camp.py).
+level, with the campsite in the woods around it at dusk (garage_camp.py).
 Those actors are named GG_CH_... and removed when the game ends; the range
 is hidden meanwhile and its lighting put back afterwards.
 
@@ -65,7 +65,7 @@ def _hide(actor, hidden):
 
 def _range_dressing(label):
     """The driving range: hidden for Golf Cornhole, which has its own ground and woods.
-    The towers' spot lights are turned off with the camp's night instead (garage_camp)."""
+    The towers' spot lights are turned off with the camp's evening instead (garage_camp)."""
     if label.startswith(("GG_Target_", "GG_Marker_", "GG_Stripe_", "GG_Tree_", "GG_Rock_", "GG_Hill_")):
         return True
     if label in ("GG_Rough", "GG_TeeBox", "GG_HittingMat"):
@@ -161,7 +161,7 @@ class CornholeSet:
         if board.get("camp"):
             self.camp = garage_camp.Camp(board["camp"])
             self.camp.build()
-            self.camp.night()
+            self.camp.dusk()
         self.bag_size = (board["bag"], board["bag_t"])
         # all 8 bags up front: spawning them mid-throw stalls a frame
         while len(self.bags) < 8:
