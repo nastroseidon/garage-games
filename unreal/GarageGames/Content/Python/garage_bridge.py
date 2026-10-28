@@ -242,7 +242,7 @@ class CornholeSet:
         """A bag just dropped into the hole: a burst of the bag's colour rising out of it."""
         if self.hole is None or not unreal.EditorAssetLibrary.does_asset_exist(HOLE_FX):
             return
-        a = _actors().spawn_actor_from_class(unreal.NiagaraActor, vec(gs.to_unreal(self.hole)))
+        a = _actors().spawn_actor_from_class(unreal.NiagaraActor, vec(gs.to_unreal(self.hole)), transient=True)
         a.set_actor_label("%sHoleFX_%d" % (CH, len(self.fx)))
         s = self.hole_r * HOLE_FX_SIZE * gs.YARD_CM / 100.0
         a.set_actor_scale3d(unreal.Vector(s, s, s))
