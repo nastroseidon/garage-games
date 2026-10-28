@@ -128,11 +128,12 @@ standing on the range.
   so the board stays centred on the screen. The game score, side against side,
   sits at the top of the sidebar in each side's color. Each player's row shows what they have on the
   board this inning.
-- **The set.** A campsite in the woods at night, at the board's scale: real-size
+- **The set.** A campsite in the woods in the early evening, at the board's scale: real-size
   grass in a clearing, a crackling campfire with sparks and smoke, two tents,
   a picnic table with a lantern, a cooler, log seats, camp chairs, a woodpile,
   string lights between two pines, and a few hundred trees fading into the
-  dark. Lanterns on shepherd's hooks either side of the board, just out of the
+  dusk. The sun is low behind the woods, downrange and to the left, so
+  the sky glows there. Lanterns on shepherd's hooks either side of the board, just out of the
   starting view, light it. The layout is laid out at real size in `cornhole.campsite` and
   scaled with the board, so it is the same camp at every hole distance. Unreal
   builds the same camp from engine shapes (`garage_camp.py`), with the fire's

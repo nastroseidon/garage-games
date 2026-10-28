@@ -1,4 +1,4 @@
-"""Golf Cornhole's campsite in the Unreal level: a grassy clearing in the woods at night, with a
+"""Golf Cornhole's campsite in the Unreal level: a grassy clearing in the woods at dusk, with a
 campfire, tents, a picnic table and string lights (the same camp web/camp-gl.js draws).
 
 The layout comes from the server (cornhole.campsite, board["camp"]) in yards, already scaled with
@@ -26,7 +26,12 @@ SHAPES = "/Engine/BasicShapes/"
 METAL = "#1b1b1d"
 BARK = "#6b5040"
 LAMP = "#ffc98a"
-CAMP_EXPOSURE = -0.3    # exposure compensation (EV) while the camp is up
+# Early evening at the camp: the sun low behind the woods, downrange and to the left, so the sky
+# glows there and the rest of it fades to blue. sun_pitch/sun_yaw aim the light (pitch below 0 is
+# above the horizon), sun_lux and sky are the sun's and sky light's brightness, exposure is the
+# exposure compensation (EV), fog_color tints the haze and sun_glow the haze towards the sun.
+DUSK = {"sun_pitch": -3.0, "sun_yaw": 150.0, "sun_lux": 3.0, "sun_color": "#ffa064", "sky": 1.0,
+        "exposure": 0.3, "fog_color": "#26304a", "sun_glow": "#ff8a4a"}
 FIRE_CD = 20.0    # the campfire's light, in real candelas (it flickers around this)
 GRASS_TILE_M = 1.2    # one repeat of the grass texture, in real metres
 
@@ -34,7 +39,7 @@ GRASS_TILE_M = 1.2    # one repeat of the grass texture, in real metres
 # m: real metres per model unit (None: fitted to the server's size). yaw, roll: degrees that turn the
 # model so it stands upright with its front along +X (the camp's forward). floor: the model's z (in
 # its own units, before turning) that stands on the ground; the bottom of its bounds if not given.
-# The firs cast no shadows and fade out past 40 real metres (where the night is dark anyway): at the
+# The firs cast no shadows and fade out past 40 real metres (lost in the evening haze anyway): at the
 # camp's scale their leaves cover the screen many times over, and the fire's shadows draw them six times.
 MODELS = {
     "tree": [{"mesh": "SM_PSG_Abies_lasiocarpa%03d" % i, "shadow": False, "cull_m": 40.0} for i in range(1, 7)],
@@ -101,6 +106,10 @@ def _turn(v, yaw, roll):
     """A model-space vector turned by roll (about X) then yaw (about Z), as an Unreal rotator does it."""
     c, s = math.cos(math.radians(roll)), math.sin(math.radians(roll))
     return _yaw([v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c], yaw)
+
+
+def _copy(c):
+    return unreal.LinearColor(c.r, c.g, c.b, c.a)
 
 
 def _cd(real_cd, k):
@@ -503,12 +512,12 @@ class Camp:
             e[0].set_actor_location(unreal.Vector(*gs.to_unreal(e[3])), False, False)
             e[0].set_actor_scale3d(unreal.Vector(*[max(size, 1e-4) * gs.YARD_CM / 100.0] * 3))
 
-    # ---------------- the night ----------------
+    # ---------------- the evening ----------------
 
-    def night(self):
-        """A dark night for the camp: a dim moon, the range's tower lights off, fog at the camp's scale.
-        Remembers the level's own settings for restore()."""
-        k = self.k
+    def dusk(self):
+        """Early evening for the camp (DUSK): a low sun and a twilight sky, the range's tower lights off,
+        fog at the camp's scale. Remembers the level's own settings for restore()."""
+        k, D = self.k, DUSK
         self.saved = []
 
         def put(setter, value, *old):
@@ -519,24 +528,28 @@ class Camp:
             if label == "GG_Sun":
                 lc = a.light_component
                 c = lc.light_color
-                put(lc.set_intensity, [0.03], lc.intensity)
+                put(lambda rot, sun=a: sun.set_actor_rotation(rot, False),
+                    [unreal.Rotator(roll=0.0, pitch=D["sun_pitch"], yaw=D["sun_yaw"])], a.get_actor_rotation())
+                put(lc.set_intensity, [D["sun_lux"]], lc.intensity)
                 # exactly the colour it had: given as 0-1 bytes, not converted from sRGB
-                put(lc.set_light_color, [garage_env.hex_color("#9fb4ff")],
+                put(lc.set_light_color, [garage_env.hex_color(D["sun_color"])],
                     unreal.LinearColor(c.r / 255.0, c.g / 255.0, c.b / 255.0, 1.0), False)
             elif label == "GG_SkyLight":
                 lc = a.light_component
-                put(lc.set_intensity, [0.03], lc.intensity)
+                put(lc.set_intensity, [D["sky"]], lc.intensity)
             elif label == "GG_Fog":
                 fc = a.component
                 put(fc.set_fog_density, [0.02 / k * 8], fc.fog_density)
                 put(fc.set_fog_height_falloff, [0.2 / k], fc.fog_height_falloff)
-                put(fc.set_fog_inscattering_color, [garage_env.hex_color("#070b14")],
-                    fc.get_editor_property("fog_inscattering_luminance"))
+                # copies: the editor hands back the live colour, which the setter would change too
+                put(fc.set_fog_inscattering_color, [garage_env.hex_color(D["fog_color"])],
+                    _copy(fc.get_editor_property("fog_inscattering_luminance")))
+                put(fc.set_directional_inscattering_color, [garage_env.hex_color(D["sun_glow"])],
+                    _copy(fc.get_editor_property("directional_inscattering_luminance")))
                 put(fc.set_start_distance, [2 * k * gs.YARD_CM], fc.start_distance)
             elif label == "GG_PostProcess":
-                # darker than the range's night: auto exposure would brighten the woods right back up
                 s = a.get_editor_property("settings")
-                put(lambda on, bias, pp=a: _exposure_bias(pp, on, bias), [True, CAMP_EXPOSURE],
+                put(lambda on, bias, pp=a: _exposure_bias(pp, on, bias), [True, D["exposure"]],
                     s.override_auto_exposure_bias, s.auto_exposure_bias)
             elif label.startswith("GG_Tower_") and isinstance(a, unreal.SpotLight):
                 lc = a.spot_light_component
