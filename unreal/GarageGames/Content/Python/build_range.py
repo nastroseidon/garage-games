@@ -56,7 +56,9 @@ def base_material():
     if eal.does_asset_exist(path):
         return unreal.load_asset(path)
     mat = assets.create_asset("M_GarageColor", ART, unreal.Material, unreal.MaterialFactoryNew())
-    color = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -500, 0)
+    # Golf Cornhole's camp (garage_camp.py) draws it on instanced meshes
+    mat.set_editor_property("used_with_instanced_static_meshes", True)
+    color =mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -500, 0)
     color.set_editor_property("parameter_name", "Color")
     color.set_editor_property("default_value", unreal.LinearColor(1, 1, 1, 1))
     glow = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -500, 250)
