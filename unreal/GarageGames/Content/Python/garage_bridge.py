@@ -33,6 +33,14 @@ TRACER_CM = 4.0
 TRACER_COLOR = unreal.LinearColor(1.0, 0.85, 0.25, 1.0)
 CH = "GG_CH_"                       # Golf Cornhole actors
 COLOR_MATERIAL = "/Game/Garage/M_GarageColor"
+# A bag in the hole: the Free Spells "LevelUp" burst (a Fab pack, never committed; nothing plays without it),
+# in the bag's colour, sized to the hole, for HOLE_FX_S seconds
+HOLE_FX = "/Game/Free_Spells/VFX_Niagara/NS_Free_Spells_LevelUp"
+HOLE_FX_COLORS = ("Color_Arrow", "Color_Ray", "Color_Sparks1", "Color_Sparks2", "Color_Wave")
+HOLE_FX_SIZE = 3.0     # where its pieces land: hole radii per metre of the effect's own layout
+HOLE_FX_SCALE = 5.0    # how big its rays, flames and sparks are (the effect's own Scale_All)
+HOLE_FX_GLOW = 6.0     # the colour's brightness (the effect glows)
+HOLE_FX_S = 4.0
 
 
 def log(msg):
@@ -81,6 +89,8 @@ class CornholeSet:
         self.bags = []      # (actor, dynamic material)
         self.bag_size = (0.0, 0.0)
         self.camp = None
+        self.hole = None
+        self.fx = []        # (actor, seconds left)
 
     def _spawn(self, label, shape, color):
         a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
@@ -163,6 +173,7 @@ class CornholeSet:
             self.camp.build()
             self.camp.dusk()
         self.bag_size = (board["bag"], board["bag_t"])
+        self.hole, self.hole_r = board["hole"], board["hole_r"]
         # all 8 bags up front: spawning them mid-throw stalls a frame
         while len(self.bags) < 8:
             actor, mid = self._spawn(CH + "Bag_%02d" % len(self.bags), "Cube", "#ffffff")
@@ -192,6 +203,28 @@ class CornholeSet:
     def tick(self, dt):
         if self.camp:
             self.camp.tick(dt)
+        for item in list(self.fx):
+            item[1] -= dt
+            if item[1] <= 0:
+                self.fx.remove(item)
+                _actors().destroy_actor(item[0])
+
+    def in_the_hole(self, color):
+        """A bag just dropped into the hole: a burst of the bag's colour rising out of it."""
+        if self.hole is None or not unreal.EditorAssetLibrary.does_asset_exist(HOLE_FX):
+            return
+        a = _actors().spawn_actor_from_class(unreal.NiagaraActor, vec(gs.to_unreal(self.hole)))
+        a.set_actor_label("%sHoleFX_%d" % (CH, len(self.fx)))
+        s = self.hole_r * HOLE_FX_SIZE * gs.YARD_CM / 100.0
+        a.set_actor_scale3d(unreal.Vector(s, s, s))
+        fx = a.niagara_component
+        fx.set_asset(unreal.load_asset(HOLE_FX))
+        c = garage_env.hex_color(color, HOLE_FX_GLOW)
+        for name in HOLE_FX_COLORS:
+            fx.set_variable_linear_color(name, c)
+        fx.set_variable_float("Scale_All", HOLE_FX_SCALE)
+        fx.activate(True)
+        self.fx.append([a, HOLE_FX_S])
 
     def clear(self):
         if self.camp:
@@ -203,7 +236,7 @@ class CornholeSet:
                 _actors().destroy_actor(a)
             elif _range_dressing(label):
                 _hide(a, False)
-        self.key, self.bags = None, []
+        self.key, self.bags, self.fx, self.hole = None, [], [], None
 
 
 class Bridge:
@@ -213,6 +246,7 @@ class Bridge:
             "connected" if up else "not reachable, retrying", host, port))
         self.handle = None
         self.player = None
+        self.hole_drops = []      # Golf Cornhole: (seconds, colour) still to play this shot
         self.start_time = 0.0
         self.last_tracer = None
         self.stats = None
@@ -282,6 +316,7 @@ class Bridge:
             cc = self.camera.camera_component
             self.home = (self.camera.get_actor_location(), self.camera.get_actor_rotation(), cc.field_of_view)
         self.player = gs.ShotPlayer(ev["plan"])
+        self.hole_drops = self.player.hole_drops()
         if self.player.cornhole:
             self.cornhole.show(self.player.cornhole["board"])
             self.idle = ev["state"]["extra"]["idle_camera"]
@@ -304,6 +339,8 @@ class Bridge:
         self.camera.camera_component.set_field_of_view(gs.horizontal_fov(vfov, p.aspect))
         if p.cornhole:
             self.cornhole.place_bags(p.bags(wall))
+            while self.hole_drops and self.hole_drops[0][0] <= wall:
+                self.cornhole.in_the_hole(self.hole_drops.pop(0)[1])
             _hide(self.ball, True)  # the bags are the ball
             if p.done(wall):
                 self.last_summary = self.stats.summary()

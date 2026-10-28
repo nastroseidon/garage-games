@@ -136,6 +136,31 @@ class UnrealMathTests(unittest.TestCase):
         self.assertEqual(gs.ball_radius_cm(0), 2.7)
         self.assertEqual(gs.ball_radius_cm(1e9), 55.0)
 
+    def test_cornhole_hole_drops(self):
+        import cornhole
+        from flight import simulate
+        board = cornhole.Board(100)
+
+        def plan(speed, bags):
+            f = simulate(speed, 24, 0.0, 6500, 0.0)
+            shot = {"speed_mph": speed, "vla_deg": 24, "hla_deg": 0.0, "spin_rpm": 6500, "spin_axis_deg": 0.0,
+                    "flight": f, "id": 1}
+            sim = cornhole.throw(board, bags, shot, 0, 0, seed=1)
+            msg = cornhole.message(board, sim, shot, {"what": "x"}, {"name": "A", "color": "#ff0000"},
+                                   ["#e8453c", "#2f6fdf"])
+            return sim, gs.ShotPlayer(msg)
+        sim, p = plan(77.0, [])                    # 77 mph at 24 degrees drops in at 100 yds
+        self.assertEqual(sim["thrown"].state, "hole")
+        drops = p.hole_drops()
+        self.assertEqual(len(drops), 1)
+        t, color = drops[0]
+        self.assertEqual(color, "#e8453c")
+        self.assertTrue(0 < t <= p.total_s)
+        self.assertFalse(p.bags(t + 0.01)[-1][0][5])     # gone from sight by then
+        # a bag already in the hole before this shot doesn't play it again
+        _, p2 = plan(60.0, sim["bags"])
+        self.assertEqual(p2.hole_drops(), [])
+
     def test_frame_stats(self):
         s = gs.FrameStats()
         for dt in [1 / 60] * 99 + [0.05]:

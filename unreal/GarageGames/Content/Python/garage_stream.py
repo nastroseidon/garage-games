@@ -180,6 +180,18 @@ class ShotPlayer:
         return ([_lerp(a[k], b[k], t) for k in range(3)], [_lerp(a[k], b[k], t) for k in range(3, 6)],
                 _lerp(a[6], b[6], t), int(a[7]))
 
+    def hole_drops(self):
+        """Golf Cornhole: [(seconds, colour)] for each bag that drops into the hole during this shot,
+        at the moment it goes out of sight (a bag knocked in by the throw counts too)."""
+        drops = []
+        for b in (self.cornhole or {}).get("bags", []):
+            if b.get("state") != "hole" or "frames" not in b:
+                continue    # not in the hole, or already in it before this shot
+            hidden = next((i for i, f in enumerate(b["frames"]) if not f[5]), None)
+            if hidden is not None:
+                drops.append((hidden / self.fps, b["color"]))
+        return sorted(drops)
+
     def bags(self, wall):
         """Golf Cornhole: [(pose, colour)] for every bag. pose = [x, y, z, yaw, pitch, visible, size]."""
         if not self.cornhole:
