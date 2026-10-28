@@ -7,8 +7,10 @@ and looks through that camera in the level viewport.
 
 During a Golf Cornhole game it also puts the server's board and bags in the
 level, with the campsite in the woods around it at dusk (garage_camp.py).
-Those actors are named GG_CH_... and removed when the game ends; the range
-is hidden meanwhile and its lighting put back afterwards.
+Those actors are named GG_CH_..., transient (saving the map never stores them)
+and removed when the game ends; the range is hidden meanwhile and its lighting
+put back afterwards. Saving the map mid-game puts the range's own look back
+for the save and the cornhole look straight after.
 
 Started automatically by init_unreal.py when the project opens. From the
 editor's Python console:
@@ -58,6 +60,11 @@ def _actors():
     return unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 
 
+def _world_actors():
+    """Every actor in the level, transient ones too (the editor's own list leaves those out)."""
+    return unreal.GameplayStatics.get_all_actors_of_class(editor_world(), unreal.Actor)
+
+
 def _hide(actor, hidden):
     actor.set_actor_hidden_in_game(hidden)
     actor.set_is_temporarily_hidden_in_editor(hidden)
@@ -83,7 +90,7 @@ class CornholeSet:
         self.camp = None
 
     def _spawn(self, label, shape, color):
-        a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
+        a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0), transient=True)
         a.set_actor_label(label)
         smc = a.static_mesh_component
         smc.set_mobility(unreal.ComponentMobility.MOVABLE)
@@ -189,6 +196,28 @@ class CornholeSet:
             mid.set_vector_parameter_value("Color", garage_env.hex_color(color))
             _hide(actor, False)
 
+    def _dressing(self):
+        return [a for a in _actors().get_all_level_actors() if _range_dressing(a.get_actor_label())]
+
+    def suspend(self):
+        """Just before the map is saved: the level's own lighting and range back (the board and the
+        camp are transient, so they stay out of the saved map by themselves)."""
+        if self.key is None:
+            return
+        if self.camp:
+            self.camp.restore()
+        for a in self._dressing():
+            _hide(a, False)
+
+    def resume(self):
+        """Straight after the save: the cornhole look again."""
+        if self.key is None:
+            return
+        if self.camp:
+            self.camp.dusk()
+        for a in self._dressing():
+            _hide(a, True)
+
     def tick(self, dt):
         if self.camp:
             self.camp.tick(dt)
@@ -197,7 +226,7 @@ class CornholeSet:
         if self.camp:
             self.camp.restore()
             self.camp = None
-        for a in _actors().get_all_level_actors():
+        for a in _world_actors():
             label = a.get_actor_label()
             if label.startswith(CH):
                 _actors().destroy_actor(a)
@@ -228,14 +257,32 @@ class Bridge:
     def start(self):
         if self.handle is None:
             self.handle = unreal.register_slate_post_tick_callback(self._tick)
+            les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+            les.on_pre_save_world.add_callable(self._pre_save)
+            les.on_post_save_world.add_callable(self._post_save)
             log("listening for shots from the Garage Games server")
 
     def stop(self):
         if self.handle is not None:
             unreal.unregister_slate_post_tick_callback(self.handle)
             self.handle = None
+            les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+            les.on_pre_save_world.remove_callable(self._pre_save)
+            les.on_post_save_world.remove_callable(self._post_save)
         self.stream.close()
         log("stopped")
+
+    def _pre_save(self, save_flags, world):
+        try:
+            self.cornhole.suspend()
+        except Exception as exc:  # never get in the way of a save
+            unreal.log_error("[Garage Games] before saving: %r" % exc)
+
+    def _post_save(self, save_flags, world, success):
+        try:
+            self.cornhole.resume()
+        except Exception as exc:
+            unreal.log_error("[Garage Games] after saving: %r" % exc)
 
     # ---------------- every editor frame ----------------
 
