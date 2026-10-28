@@ -239,6 +239,12 @@ class Camp:
             for tex in ("BaseColorTexture", "MetallicRoughnessTexture", "NormalTexture", "OcclusionTexture"):
                 mid.set_vector_parameter_value(tex + "_OffsetScale", unreal.LinearColor(0, 0, reps, reps))
             mid.set_vector_parameter_value("BaseColorFactor", unreal.LinearColor(0.7, 0.7, 0.7, 1))
+            # matte: grass doesn't mirror a low sun. Its texture's roughness is low and a glTF material can
+            # only scale that down, so a plain white texture stands in for it (fully rough), and no metal.
+            mid.set_texture_parameter_value("MetallicRoughnessTexture",
+                                            unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture"))
+            mid.set_scalar_parameter_value("MetallicFactor", 0.0)
+            mid.set_scalar_parameter_value("SpecularFactor", 0.3)
         else:
             self.part("Cylinder", "#29461f", lawn, [2 * r, 2 * r, 0.02 * k])
         f = c["fire"]
