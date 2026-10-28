@@ -6,7 +6,8 @@ the board; camp["k"] is yards per real metre, for the sizes of the small things 
 
 Everything that stands still is batched by shape and colour into a few instanced-mesh actors;
 the fire's flames, embers and the lights are their own actors so they can flicker. All actors are
-named GG_CH_Camp_... so CornholeSet.clear() removes them with the board.
+named GG_CH_Camp_... so CornholeSet.clear() removes them with the board. They are transient, so
+saving the map never stores them.
 
 Where this PC has the models in MODELS (from Fab and elsewhere: never committed, their licences
 don't allow it), they stand in for the shapes; on any other PC the camp is built from shapes.
@@ -228,7 +229,8 @@ class Camp:
         lawn = _add(c["center"], [0, 0, -0.008 * k])
         grass = garage_env.dressing()["grass"]
         if grass:    # the Fab grass, tiled at its real size
-            a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(*gs.to_unreal(lawn)))
+            a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(*gs.to_unreal(lawn)),
+                                                 transient=True)
             a.set_actor_label(CAMP + "Grass")
             smc = a.static_mesh_component
             smc.set_mobility(unreal.ComponentMobility.MOVABLE)
@@ -437,7 +439,7 @@ class Camp:
         lib = unreal.SubobjectDataBlueprintFunctionLibrary
         base = unreal.load_asset(COLOR_MATERIAL)
         for n, ((shape, color, glow), transforms) in enumerate(sorted(self.parts.items(), key=lambda kv: kv[0])):
-            a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
+            a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0), transient=True)
             name = color.rsplit(".", 1)[-1] if shape == "model" else shape
             a.set_actor_label("%s%s_%02d" % (CAMP, name, n))
             a.static_mesh_component.set_mobility(unreal.ComponentMobility.MOVABLE)
@@ -466,7 +468,7 @@ class Camp:
         self.parts = {}
 
     def spawn_actor(self, name, shape, color, glow):
-        a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
+        a = _actors().spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0), transient=True)
         a.set_actor_label(CAMP + name)
         smc = a.static_mesh_component
         smc.set_mobility(unreal.ComponentMobility.MOVABLE)
@@ -477,7 +479,7 @@ class Camp:
         return a
 
     def light(self, name, at, color, real_cd, reach_m, shadows=False):
-        a = _actors().spawn_actor_from_class(unreal.PointLight, unreal.Vector(*gs.to_unreal(at)))
+        a = _actors().spawn_actor_from_class(unreal.PointLight, unreal.Vector(*gs.to_unreal(at)), transient=True)
         a.set_actor_label(CAMP + name)
         lc = a.point_light_component
         lc.set_mobility(unreal.ComponentMobility.MOVABLE)
